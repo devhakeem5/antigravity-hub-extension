@@ -93,7 +93,7 @@ function registerCommands(
   const disposables: vscode.Disposable[] = [];
 
   // Initialize UI Providers
-  const statusBarProvider = new StatusBarProvider(accountRepo);
+  const statusBarProvider = new StatusBarProvider(accountRepo, accountService);
   disposables.push(statusBarProvider);
 
   const accountsProvider = new AccountsWebviewProvider(context.extensionUri, accountRepo, accountService);
@@ -108,11 +108,7 @@ function registerCommands(
     })
   );
 
-  // Sync active account state with Antigravity on startup
-  // This detects if the user switched accounts directly in Antigravity
-  accountService.syncActiveAccountWithAntigravity().catch(() => {
-    // Non-fatal: don't block extension activation
-  });
+  // No longer syncing on startup, webview detects it dynamically on render.
 
   disposables.push(
     vscode.commands.registerCommand('antigravity-hub.openPanel', () => {
@@ -162,7 +158,6 @@ function registerCommands(
 
   disposables.push(
     vscode.commands.registerCommand('antigravity-hub.refreshBalances', async () => {
-      await accountService.syncActiveAccountWithAntigravity();
       await accountService.refreshBalancesWorkflow(true);
     })
   );

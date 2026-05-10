@@ -10,11 +10,15 @@ import * as vscode from 'vscode';
 import { IAccountRepository } from '../../core/domain/repositories/account.repository';
 import { I18nService } from '../../i18n/i18n.service';
 import { AccountStatus } from '../../core/domain/models/account.model';
+import { AccountService } from '../../features/accounts/account.service';
 
 export class StatusBarProvider implements vscode.Disposable {
   private statusBarItem: vscode.StatusBarItem;
 
-  constructor(private accountRepo: IAccountRepository) {
+  constructor(
+    private accountRepo: IAccountRepository,
+    private accountService: AccountService
+  ) {
     // Create item aligned to the right, priority 100 (pushes it to the far right)
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.statusBarItem.command = 'antigravity-hub.switchAccount';
@@ -27,7 +31,7 @@ export class StatusBarProvider implements vscode.Disposable {
    * Refreshes the status bar display based on the current active account.
    */
   async update(): Promise<void> {
-    const activeEmail = await this.accountRepo.getActiveAccountEmail();
+    const activeEmail = await this.accountService.getActiveAntigravityEmail();
     const i18n = I18nService.getInstance();
 
     if (!activeEmail) {

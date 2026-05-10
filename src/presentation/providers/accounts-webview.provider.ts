@@ -87,7 +87,6 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         case 'refreshAccounts':
           this._view?.webview.postMessage({ command: 'showLoading', text: i18n.t('accounts.refreshingBalances') });
           try {
-            await this.accountService.syncActiveAccountWithAntigravity();
             await this.accountService.refreshBalancesWorkflow(true);
           } finally {
             this._view?.webview.postMessage({ command: 'hideLoading' });
@@ -126,10 +125,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    // Sync active account with Antigravity's actual state before first render
-    this.accountService.syncActiveAccountWithAntigravity().then(async () => {
-      await this.refresh();
-
+    // Trigger an initial refresh
+    this.refresh().then(async () => {
       // Auto-refresh balances if they are older than 5 minutes
       const accounts = await this.accountRepo.getAllAccounts();
       if (accounts.length > 0) {
@@ -140,15 +137,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         if (now - lastRefreshed > fiveMinutesMs) {
           this._view?.webview.postMessage({ command: 'showLoading', text: i18n.t('accounts.refreshingBalances') });
           try {
-            await this.accountService.syncActiveAccountWithAntigravity();
             await this.accountService.refreshBalancesWorkflow(false); // false = no toast notification for auto-refresh
           } finally {
             this._view?.webview.postMessage({ command: 'hideLoading' });
           }
         }
       }
-    }).catch(async () => {
-      await this.refresh(); // Still render even if sync fails
     });
   }
 
@@ -371,6 +365,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const isRtl = i18n.getLocale() === 'ar';
     const configLanguage = vscode.workspace.getConfiguration('antigravityHub').get<string>('language', 'auto');
     const accounts = await this.accountRepo.getAccountSummaries();
+
+    // ── Dynamically determine Active Account from Antigravity DB ──
+    const activeEmail = await this.accountService.getActiveAntigravityEmail();
+    accounts.forEach(acc => {
+      acc.isActive = (activeEmail && acc.email === activeEmail) ? true : false;
+    });
 
     // ── Preferred Model Resolution ──
     // Extract available model keys from first account with balances (after filtering)

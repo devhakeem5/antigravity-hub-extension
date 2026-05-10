@@ -168,7 +168,8 @@ export class AccountService {
     const result = await this.stateDbService.injectAccountState(account, tokens, deviceProfile);
     
     if (result === 'success') {
-      await this.accountRepo.setActiveAccount(email);
+      // We no longer save the active account in the local DB.
+      // It will be dynamically detected from Antigravity's state.vscdb on next render.
       this._onAccountsChanged.fire();
       // NOTE: Window reload is handled by StateDbService if user consents
     } else if (result === 'error') {
@@ -178,61 +179,15 @@ export class AccountService {
   }
 
   /**
-   * Sync the extension's active account state with Antigravity's actual state.
-   * 
-   * Reads the currently logged-in email from Antigravity's state.vscdb and:
-   * - If the email matches an account in our list → marks it as active
-   * - If the email doesn't match any account → clears the active status
-   * - If no email is found in DB → leaves everything as-is
-   * 
-   * This ensures the extension UI always reflects reality, even if the user
-   * switched accounts directly in Antigravity without using this extension.
+   * Get the currently active account email directly from Antigravity's state database.
+   * Does NOT rely on the tool's local database.
    */
-  async syncActiveAccountWithAntigravity(): Promise<void> {
+  async getActiveAntigravityEmail(): Promise<string | null> {
     try {
-      const currentEmail = await this.stateDbService.readCurrentEmailFromDb();
-      const currentActiveEmail = await this.accountRepo.getActiveAccountEmail();
-
-      if (!currentEmail) {
-        // Antigravity is logged out or email couldn't be detected
-        Logger.getInstance().info('Could not detect active Antigravity account.');
-        if (currentActiveEmail) {
-          // Clear active status since Antigravity is not using any account
-          Logger.getInstance().info(
-            `Antigravity appears logged out. Clearing active status from ${currentActiveEmail}.`
-          );
-          await this.accountRepo.setActiveAccount('');
-          this._onAccountsChanged.fire();
-        }
-        return;
-      }
-
-      // Check if this email is in our accounts list
-      const account = await this.accountRepo.getAccount(currentEmail);
-
-      if (account) {
-        // The Antigravity account IS in our list
-        if (currentActiveEmail !== currentEmail) {
-          // Active status is out of sync → update it
-          Logger.getInstance().info(
-            `Syncing active account: Antigravity has ${currentEmail}, extension had ${currentActiveEmail || 'none'}. Updating...`
-          );
-          await this.accountRepo.setActiveAccount(currentEmail);
-          this._onAccountsChanged.fire();
-        }
-      } else {
-        // The Antigravity account is NOT in our list → clear active status
-        if (currentActiveEmail) {
-          Logger.getInstance().info(
-            `Antigravity is using ${currentEmail} which is not in our list. Clearing active status from ${currentActiveEmail}.`
-          );
-          await this.accountRepo.setActiveAccount('');
-          this._onAccountsChanged.fire();
-        }
-      }
-    } catch (error: any) {
-      Logger.getInstance().error('Failed to sync active account with Antigravity', error);
-      // Non-fatal: don't disrupt the user experience
+      return await this.stateDbService.readCurrentEmailFromDb();
+    } catch (error) {
+      Logger.getInstance().error('Failed to read active account from Antigravity', error);
+      return null;
     }
   }
 
@@ -351,11 +306,8 @@ export class AccountService {
       await this.accountRepo.removeAccount(email);
       vscode.window.showInformationMessage(i18n.t('service.accountRemoved', { email }));
       
-      // Check if the removed account was active
-      const activeEmail = await this.accountRepo.getActiveAccountEmail();
-      if (activeEmail === email) {
-        await this.accountRepo.setActiveAccount(''); // Clear active status
-      }
+      // We no longer need to check or clear the active account in local DB
+      // because it is dynamically read from Antigravity.
       
       this._onAccountsChanged.fire();
     }
