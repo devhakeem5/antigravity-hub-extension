@@ -692,7 +692,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       return `
         <div class="account-card ${acc.isActive ? 'active' : ''}">
           <div class="card-header">
-            <div class="avatar">${acc.displayName.charAt(0).toUpperCase()}</div>
+            ${acc.avatarUrl ? `<img class="avatar" src="${acc.avatarUrl}" alt="${acc.displayName}" />` : `<div class="avatar">${acc.displayName.charAt(0).toUpperCase()}</div>`}
             <div class="user-info">
               <h4>${acc.displayName}</h4>
               <p>${acc.email}</p>
@@ -851,6 +851,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             font-size: 1.2rem;
             color: var(--vscode-button-foreground, white);
             box-shadow: 0 4px 10px var(--shadow-color);
+            object-fit: cover;
           }
 
           .user-info { flex: 1; overflow: hidden; min-width: 0; }

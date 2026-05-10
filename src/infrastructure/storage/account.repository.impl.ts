@@ -141,6 +141,7 @@ export class AccountRepositoryImpl implements IAccountRepository {
     return accounts.map(a => ({
       email: a.email,
       displayName: a.alias || a.name || a.email,
+      avatarUrl: a.avatarUrl,
       balances: a.balances,
       status: a.status,
       isActive: a.isActive
