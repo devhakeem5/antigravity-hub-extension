@@ -1,0 +1,7 @@
+repo.zip
+node_modules/
+out/
+dist/
+*.vsix
+antigravity-backup.json
+end-report.md

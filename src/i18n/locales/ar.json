@@ -1,0 +1,210 @@
+{
+  "common": {
+    "appName": "أداة مساعد Antigravity",
+    "loading": "جارٍ التحميل...",
+    "error": "خطأ",
+    "success": "تم بنجاح",
+    "confirm": "تأكيد",
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "delete": "حذف",
+    "edit": "تعديل",
+    "refresh": "تحديث",
+    "close": "إغلاق",
+    "yes": "نعم",
+    "no": "لا",
+    "ok": "حسناً",
+    "back": "رجوع",
+    "next": "التالي",
+    "settings": "الإعدادات",
+    "search": "بحث...",
+    "noResults": "لم يتم العثور على نتائج",
+    "retry": "إعادة المحاولة"
+  },
+  "commands": {
+    "openPanel": {
+      "placeholder": "سيتم تنفيذ لوحة إدارة الحسابات قريباً."
+    },
+    "addAccount": {
+      "placeholder": "سيتم تنفيذ إضافة حساب قريباً."
+    },
+    "switchAccount": {
+      "placeholder": "سيتم تنفيذ تبديل الحساب قريباً."
+    },
+    "refreshBalances": {
+      "placeholder": "سيتم تنفيذ تحديث الأرصدة قريباً."
+    },
+    "setLanguage": {
+      "placeholder": "اختر لغة العرض"
+    }
+  },
+  "accounts": {
+    "title": "الحسابات",
+    "addButton": "إضافة حساب",
+    "removeButton": "إزالة الحساب",
+    "switchButton": "تبديل",
+    "refreshButton": "تحديث",
+    "settingsButton": "إعدادات",
+    "noAccounts": "لا توجد حسابات مضافة بعد",
+    "addFirstAccount": "أضف حسابك الأول للبدء",
+    "active": "نشط",
+    "inactive": "غير نشط",
+    "expired": "منتهي الصلاحية",
+    "blocked": "محظور مؤقتاً",
+    "alias": {
+      "title": "اسم مستعار للحساب",
+      "placeholder": "أدخل اسماً مميزاً لهذا الحساب",
+      "save": "حفظ الاسم"
+    },
+    "confirmDelete": "هل أنت متأكد من إزالة هذا الحساب؟",
+    "deleteWarning": "سيتم حذف الحساب وجميع التوكنات المخزنة نهائياً.",
+    "balance": "{{amount}} كريدت",
+    "balanceOf": "{{amount}} / {{total}} كريدت",
+    "plan": {
+      "free": "مجاني",
+      "premium": "AI Premium",
+      "ultra": "AI Ultra",
+      "unknown": "خطة غير معروفة"
+    },
+    "status": {
+      "active": "نشط",
+      "lowBalance": "رصيد منخفض",
+      "depleted": "نفد الرصيد",
+      "expired": "التوكن منتهي",
+      "error": "خطأ في الاتصال"
+    },
+    "sort": {
+      "byBalance": "ترتيب حسب الرصيد",
+      "byDate": "ترتيب حسب تاريخ الإضافة",
+      "byName": "ترتيب أبجدياً"
+    },
+    "noExportAccounts": "لا توجد حسابات لتصديرها.",
+    "preparingExport": "جارٍ تجهيز بيانات التصدير...",
+    "noValidExportData": "لم يتم العثور على بيانات صالحة للتصدير.",
+    "saveBackup": "حفظ النسخة الاحتياطية",
+    "exportSuccess": "✅ تم تصدير {{count}} حساب بنجاح.",
+    "exportFailed": "❌ فشل التصدير: {{error}}",
+    "selectBackup": "اختر ملف النسخة الاحتياطية",
+    "verifyingFile": "جارٍ التحقق من الملف...",
+    "invalidFile": "❌ الملف المحدد غير صالح أو تالف.",
+    "noBackupData": "❌ الملف لا يحتوي على بيانات نسخة احتياطية صالحة.",
+    "incompleteAccount": "❌ بيانات الحساب {{email}} غير مكتملة.",
+    "importingAccounts": "جارٍ استيراد الحسابات...",
+    "importSuccess": "✅ تم استيراد {{count}} حساب بنجاح.",
+    "importSkipped": "\n⏭️ تم تخطي {{count}} حساب (موجود مسبقاً).",
+    "importFailed": "❌ فشل الاستيراد: {{error}}",
+    "confirmSwitch": "هل أنت متأكد من رغبتك في تنشيط الحساب:\n{{email}} ؟",
+    "refreshingBalances": "جارٍ تحديث الأرصدة...",
+    "models": "النماذج",
+    "availableModels": "النماذج المتاحة ({{count}})",
+    "activate": "تنشيط",
+    "remove": "إزالة",
+    "noAvailableModels": "لا توجد نماذج متاحة",
+    "noAccountsRegistered": "لا توجد حسابات مسجلة بعد.",
+    "addNewAccount": "➕ إضافة حساب جديد",
+    "more": "المزيد",
+    "exportAccounts": "تصدير الحسابات",
+    "importAccounts": "استيراد حسابات",
+    "settings": "الإعدادات"
+  },
+  "statusBar": {
+    "noAccount": "لا يوجد حساب",
+    "credits": "{{amount}} كريدت",
+    "tooltip": "انقر لتبديل الحساب"
+  },
+  "notifications": {
+    "lowBalance": "⚠️ رصيد منخفض في {{email}}: {{amount}} كريدت متبقي",
+    "depleted": "🔴 نفد الرصيد في {{email}}! جارٍ التبديل للحساب التالي...",
+    "switched": "✅ تم التبديل إلى {{email}} ({{amount}} كريدت)",
+    "tokenExpired": "🔑 انتهت صلاحية التوكن لـ {{email}}. يرجى إعادة المصادقة.",
+    "connectionError": "❌ فشل الاتصال بـ {{email}}",
+    "refreshComplete": "✅ تم تحديث جميع الأرصدة"
+  },
+  "auth": {
+    "signingIn": "جارٍ تسجيل الدخول بحساب Google...",
+    "waitingForBrowser": "في انتظار المصادقة من المتصفح...",
+    "authSuccess": "تمت المصادقة بنجاح!",
+    "authFailed": "فشلت المصادقة. يرجى المحاولة مرة أخرى.",
+    "browserOpened": "تم فتح نافذة المتصفح لتسجيل الدخول."
+  },
+  "settings": {
+    "title": "الإعدادات",
+    "refreshInterval": {
+      "label": "فترة التحديث",
+      "description": "كم مرة يتم تحديث بيانات الرصيد (بالدقائق)"
+    },
+    "lowCreditThreshold": {
+      "label": "حد الرصيد المنخفض",
+      "description": "التنبيه عندما ينخفض الرصيد عن هذا المبلغ"
+    },
+    "language": {
+      "label": "اللغة",
+      "description": "لغة عرض الإضافة"
+    },
+    "export": "تصدير الإعدادات",
+    "import": "استيراد الإعدادات"
+  },
+  "webview": {
+    "unspecified": "غير محدد",
+    "availableNow": "متوفر الآن",
+    "renewsInDaysMins": "يتجدد بعد {{days}}ي {{mins}}د",
+    "renewsInDaysHoursMins": "يتجدد بعد {{days}}ي {{hours}}س {{mins}}د",
+    "renewsInHoursMins": "يتجدد بعد {{hours}}س {{mins}}د",
+    "selectThisModel": "تحديد هذا المودل",
+    "veryLowBalance": "الرصيد منخفض جداً",
+    "showAvailableModels": "عرض النماذج المتاحة",
+    "activatePreferredModel": "تنشيط هذا المودل المفضل",
+    "preferredModelSort": "النموذج المفضل للترتيب",
+    "noSelectionDefault": "بدون تحديد (ترتيب افتراضي)",
+    "sortExplanation": "سيتم ترتيب الحسابات وفقاً لرصيد هذا النموذج أولاً.",
+    "loginRequired": "سجل الدخول لحساب لتمكين هذا الخيار",
+    "activating": "جاري التنشيط...",
+    "language": "اللغة",
+    "languageAuto": "تلقائي (حسب النظام)"
+  },
+  "service": {
+    "generatingDeviceProfile": "جاري إنشاء بصمة الجهاز...",
+    "accountAddedErrorBalance": "تمت إضافة الحساب {{email}}، ولكن فشل جلب الرصيد. سيتم المحاولة لاحقاً.",
+    "accountAddedSuccess": "تم إضافة الحساب {{email}} بنجاح. الأرصدة: [{{balances}}]",
+    "accountAddError": "خطأ أثناء إضافة الحساب: {{error}}",
+    "missingLoginData": "بيانات تسجيل الدخول للحساب {{email}} مفقودة. الرجاء إزالته وإضافته مجدداً.",
+    "sessionExpiredFailed": "انتهت صلاحية جلسة الحساب {{email}} وفشل تجديدها. يرجى إعادة المصادقة.",
+    "refreshInProgress": "⏳ عملية تحديث الأرصدة قيد التنفيذ بالفعل...",
+    "refreshCooldown": "⏳ يرجى الانتظار {{seconds}} ثانية قبل التحديث مرة أخرى.",
+    "accountRemoved": "تمت إزالة الحساب {{email}} وجميع بياناته بنجاح.",
+    "switchFailed": "فشل التبديل إلى الحساب {{email}}. يرجى التحقق من الأخطاء والمحاولة مجدداً."
+  },
+  "stateDb": {
+    "outdatedAntigravity": "إصدار Antigravity المثبت أقدم من {{minVersion}} وغير مدعوم.\nيرجى تحديث Antigravity إلى الإصدار {{minVersion}} أو أحدث لاستخدام ميزة تبديل الحسابات.",
+    "dbNotFound": "لم يتم العثور على قاعدة بيانات Antigravity.\nتأكد من أنك قمت بتشغيل Antigravity وتسجيل الدخول مرة واحدة على الأقل.",
+    "injectionFailed": "فشل حقن البيانات في قاعدة البيانات: {{error}}\nحاول إغلاق جميع نوافذ Antigravity الأخرى ثم أعد المحاولة.",
+    "reloadPrompt": "سيتم إغلاق هذه النافذة وإعادة فتح Antigravity بالحساب الجديد."
+  },
+  "oauth": {
+    "timeout": "انتهى وقت انتظار المصادقة. يرجى المحاولة مرة أخرى.",
+    "authFailedTitle": "فشلت المصادقة",
+    "authFailedDetail": "حدث خطأ أثناء المصادقة: {{error}}",
+    "authSuccessTitle": "تمت المصادقة بنجاح",
+    "authSuccessDetail": "لقد تم ربط الحساب بإضافة Antigravity بنجاح. يمكنك إغلاق هذه النافذة والعودة إلى المحرر.",
+    "noPorts": "لا توجد منافذ متاحة (Ports) لتشغيل خادم المصادقة المحلي.",
+    "closeWindow": "إغلاق النافذة"
+  },
+  "authService": {
+    "noRefreshToken": "لم يتم استلام Refresh Token. الرجاء إعادة المحاولة والموافقة على الصلاحيات.",
+    "noEmail": "لم يتم استرجاع البريد الإلكتروني. يرجى التأكد من الصلاحيات."
+  },
+  "extension": {
+    "noAccountsToSwitch": "لا توجد حسابات مسجلة. قم بإضافة حساب أولاً.",
+    "selectAccountToSwitch": "اختر الحساب الذي تود التبديل إليه"
+  },
+  "switchPrompt": {
+    "title": "تم تبديل الحساب بنجاح إلى {{email}}",
+    "detail": "يحتاج المحرر إلى إعادة التحميل (Reload) لتفعيل الحساب الجديد. هل ترغب في ذلك الآن؟ (سيتم حفظ جميع الملفات المفتوحة تلقائياً)",
+    "actionYes": "إعادة التحميل الآن",
+    "actionNo": "لاحقاً"
+  },
+  "theme": {
+    "darkMode": "الوضع الداكن",
+    "lightMode": "الوضع الفاتح"
+  }
+}

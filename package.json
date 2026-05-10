@@ -1,0 +1,160 @@
+{
+  "name": "antigravity-hub",
+  "displayName": "Antigravity Hub",
+  "description": "Manage multiple Antigravity accounts seamlessly - switch, monitor credits, and auto-rotate with one click.",
+  "version": "0.1.0",
+  "publisher": "devhakeem5",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devhakeem5/antigravity-hub-extension"
+  },
+  "bugs": {
+    "url": "https://github.com/devhakeem5/antigravity-hub-extension/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "antigravity",
+    "account-manager",
+    "google-ai",
+    "credits",
+    "multi-account"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "resources/icons/logo_with_title_bordered.png",
+  "contributes": {
+    "commands": [
+      {
+        "command": "antigravity-hub.openPanel",
+        "title": "Open Account Manager",
+        "category": "Antigravity Hub"
+      },
+      {
+        "command": "antigravity-hub.addAccount",
+        "title": "Add Account",
+        "category": "Antigravity Hub"
+      },
+      {
+        "command": "antigravity-hub.switchAccount",
+        "title": "Switch Account",
+        "category": "Antigravity Hub"
+      },
+      {
+        "command": "antigravity-hub.refreshBalances",
+        "title": "Refresh All Balances",
+        "category": "Antigravity Hub"
+      },
+      {
+        "command": "antigravity-hub.setLanguage",
+        "title": "Set Language",
+        "category": "Antigravity Hub"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "antigravity-hub",
+          "title": "Antigravity Hub",
+          "icon": "resources/icons/sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "antigravity-hub": [
+        {
+          "type": "webview",
+          "id": "antigravity-hub.accountsView",
+          "name": "Accounts",
+          "icon": "resources/icons/sidebar-icon.svg"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "antigravity-hub.openPanel",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "antigravity-hub.switchAccount",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+shift+s"
+      },
+      {
+        "command": "antigravity-hub.addAccount",
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n"
+      },
+      {
+        "command": "antigravity-hub.refreshBalances",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
+      }
+    ],
+    "configuration": {
+      "title": "Antigravity Hub",
+      "properties": {
+        "antigravityHub.language": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "en",
+            "ar"
+          ],
+          "enumDescriptions": [
+            "Auto (Detect from Editor)",
+            "English",
+            "العربية"
+          ],
+          "description": "Display language for the extension UI"
+        },
+        "antigravityHub.refreshIntervalMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "maximum": 120,
+          "description": "Interval in minutes for automatic balance refresh"
+        },
+        "antigravityHub.lowCreditThreshold": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "description": "Credit threshold for low balance warning"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:sql.js --format=cjs --platform=node --minify",
+    "watch": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:sql.js --format=cjs --platform=node --sourcemap --watch",
+    "compile": "tsc -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "npx -y @vscode/vsce package",
+    "package:win": "npx -y @vscode/vsce package --target win32-x64",
+    "package:mac": "npx -y @vscode/vsce package --target darwin-arm64 --target darwin-x64",
+    "package:linux": "npx -y @vscode/vsce package --target linux-x64",
+    "package:all": "npm run package:win && npm run package:mac && npm run package:linux"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "sql.js": "^1.14.1"
+  }
+}

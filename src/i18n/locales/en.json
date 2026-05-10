@@ -1,0 +1,210 @@
+{
+  "common": {
+    "appName": "Antigravity Hub",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "refresh": "Refresh",
+    "close": "Close",
+    "yes": "Yes",
+    "no": "No",
+    "ok": "OK",
+    "back": "Back",
+    "next": "Next",
+    "settings": "Settings",
+    "search": "Search...",
+    "noResults": "No results found",
+    "retry": "Retry"
+  },
+  "commands": {
+    "openPanel": {
+      "placeholder": "Account Manager panel will be implemented soon."
+    },
+    "addAccount": {
+      "placeholder": "Add Account flow will be implemented soon."
+    },
+    "switchAccount": {
+      "placeholder": "Switch Account flow will be implemented soon."
+    },
+    "refreshBalances": {
+      "placeholder": "Balance refresh will be implemented soon."
+    },
+    "setLanguage": {
+      "placeholder": "Select display language"
+    }
+  },
+  "accounts": {
+    "title": "Accounts",
+    "addButton": "Add Account",
+    "removeButton": "Remove Account",
+    "switchButton": "Switch",
+    "refreshButton": "Refresh",
+    "settingsButton": "Settings",
+    "noAccounts": "No accounts added yet",
+    "addFirstAccount": "Add your first account to get started",
+    "active": "Active",
+    "inactive": "Inactive",
+    "expired": "Expired",
+    "blocked": "Temporarily Blocked",
+    "alias": {
+      "title": "Account Alias",
+      "placeholder": "Enter a nickname for this account",
+      "save": "Save Alias"
+    },
+    "confirmDelete": "Are you sure you want to remove this account?",
+    "deleteWarning": "This will permanently remove the account and its stored tokens.",
+    "balance": "{{amount}} credits",
+    "balanceOf": "{{amount}} / {{total}} credits",
+    "plan": {
+      "free": "Free",
+      "premium": "AI Premium",
+      "ultra": "AI Ultra",
+      "unknown": "Unknown Plan"
+    },
+    "status": {
+      "active": "Active",
+      "lowBalance": "Low Balance",
+      "depleted": "Credits Depleted",
+      "expired": "Token Expired",
+      "error": "Connection Error"
+    },
+    "sort": {
+      "byBalance": "Sort by Balance",
+      "byDate": "Sort by Date Added",
+      "byName": "Sort Alphabetically"
+    },
+    "noExportAccounts": "No accounts to export.",
+    "preparingExport": "Preparing export data...",
+    "noValidExportData": "No valid data found to export.",
+    "saveBackup": "Save Backup",
+    "exportSuccess": "✅ Successfully exported {{count}} accounts.",
+    "exportFailed": "❌ Export failed: {{error}}",
+    "selectBackup": "Select Backup File",
+    "verifyingFile": "Verifying file...",
+    "invalidFile": "❌ The selected file is invalid or corrupted.",
+    "noBackupData": "❌ The file does not contain valid backup data.",
+    "incompleteAccount": "❌ Account data for {{email}} is incomplete.",
+    "importingAccounts": "Importing accounts...",
+    "importSuccess": "✅ Successfully imported {{count}} accounts.",
+    "importSkipped": "\n⏭️ Skipped {{count}} accounts (already exist).",
+    "importFailed": "❌ Import failed: {{error}}",
+    "confirmSwitch": "Are you sure you want to activate the account:\n{{email}}?",
+    "refreshingBalances": "Refreshing balances...",
+    "models": "Models",
+    "availableModels": "Available Models ({{count}})",
+    "activate": "Activate",
+    "remove": "Remove",
+    "noAvailableModels": "No models available",
+    "noAccountsRegistered": "No accounts registered yet.",
+    "addNewAccount": "➕ Add New Account",
+    "more": "More",
+    "exportAccounts": "Export Accounts",
+    "importAccounts": "Import Accounts",
+    "settings": "Settings"
+  },
+  "statusBar": {
+    "noAccount": "No account",
+    "credits": "{{amount}} credits",
+    "tooltip": "Click to switch account"
+  },
+  "notifications": {
+    "lowBalance": "⚠️ Low balance on {{email}}: {{amount}} credits remaining",
+    "depleted": "🔴 Credits depleted on {{email}}! Switching to next account...",
+    "switched": "✅ Switched to {{email}} ({{amount}} credits)",
+    "tokenExpired": "🔑 Token expired for {{email}}. Please re-authenticate.",
+    "connectionError": "❌ Failed to connect to {{email}}",
+    "refreshComplete": "✅ All balances refreshed"
+  },
+  "auth": {
+    "signingIn": "Signing in with Google...",
+    "waitingForBrowser": "Waiting for browser authentication...",
+    "authSuccess": "Successfully authenticated!",
+    "authFailed": "Authentication failed. Please try again.",
+    "browserOpened": "A browser window has been opened for sign-in."
+  },
+  "settings": {
+    "title": "Settings",
+    "refreshInterval": {
+      "label": "Refresh Interval",
+      "description": "How often to refresh balance data (in minutes)"
+    },
+    "lowCreditThreshold": {
+      "label": "Low Credit Threshold",
+      "description": "Warn when credits drop below this amount"
+    },
+    "language": {
+      "label": "Language",
+      "description": "Display language for the extension"
+    },
+    "export": "Export Settings",
+    "import": "Import Settings"
+  },
+  "webview": {
+    "unspecified": "Unspecified",
+    "availableNow": "Available Now",
+    "renewsInDaysMins": "Renews in {{days}}d {{mins}}m",
+    "renewsInDaysHoursMins": "Renews in {{days}}d {{hours}}h {{mins}}m",
+    "renewsInHoursMins": "Renews in {{hours}}h {{mins}}m",
+    "selectThisModel": "Select this model",
+    "veryLowBalance": "Very low balance",
+    "showAvailableModels": "Show available models",
+    "activatePreferredModel": "Activate this preferred model",
+    "preferredModelSort": "Preferred Model for Sorting",
+    "noSelectionDefault": "None (Default Sort)",
+    "sortExplanation": "Accounts will be sorted by the balance of this model first.",
+    "loginRequired": "Sign in to an account to enable this option",
+    "activating": "Activating...",
+    "language": "Language",
+    "languageAuto": "Auto (System Default)"
+  },
+  "service": {
+    "generatingDeviceProfile": "Generating device profile...",
+    "accountAddedErrorBalance": "Account {{email}} added, but fetching balance failed. Will retry later.",
+    "accountAddedSuccess": "Account {{email}} added successfully. Balances: [{{balances}}]",
+    "accountAddError": "Error adding account: {{error}}",
+    "missingLoginData": "Login data for {{email}} is missing. Please remove and add it again.",
+    "sessionExpiredFailed": "Session for {{email}} expired and failed to renew. Please re-authenticate.",
+    "refreshInProgress": "⏳ Balance refresh is already in progress...",
+    "refreshCooldown": "⏳ Please wait {{seconds}} seconds before refreshing again.",
+    "accountRemoved": "Account {{email}} and all its data removed successfully.",
+    "switchFailed": "Failed to switch to account {{email}}. Please check errors and try again."
+  },
+  "stateDb": {
+    "outdatedAntigravity": "Installed Antigravity version is older than {{minVersion}} and not supported.\nPlease update Antigravity to version {{minVersion}} or newer to use account switching.",
+    "dbNotFound": "Antigravity database not found.\nMake sure you have launched Antigravity and logged in at least once.",
+    "injectionFailed": "Failed to inject data into database: {{error}}\nTry closing all other Antigravity windows and try again.",
+    "reloadPrompt": "This window will close and Antigravity will be reopened with the new account."
+  },
+  "oauth": {
+    "timeout": "Authentication timeout. Please try again.",
+    "authFailedTitle": "Authentication Failed",
+    "authFailedDetail": "An error occurred during authentication: {{error}}",
+    "authSuccessTitle": "Authentication Successful",
+    "authSuccessDetail": "The account has been successfully linked to the Antigravity extension. You can close this window and return to the editor.",
+    "noPorts": "No available ports to run local authentication server.",
+    "closeWindow": "Close Window"
+  },
+  "authService": {
+    "noRefreshToken": "Refresh Token not received. Please try again and accept all permissions.",
+    "noEmail": "Email not retrieved. Please check permissions."
+  },
+  "extension": {
+    "noAccountsToSwitch": "No accounts registered. Please add an account first.",
+    "selectAccountToSwitch": "Select the account you want to switch to"
+  },
+  "switchPrompt": {
+    "title": "Successfully switched account to {{email}}",
+    "detail": "The editor needs to be reloaded to activate the new account. Would you like to reload now? (All open files will be automatically saved)",
+    "actionYes": "Reload Now",
+    "actionNo": "Later"
+  },
+  "theme": {
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode"
+  }
+}

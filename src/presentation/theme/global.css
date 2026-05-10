@@ -1,0 +1,100 @@
+/*
+ * Antigravity Helper Tool — Global Theme System
+ * 
+ * Design Identity: VS Code Native Theme Integration
+ * 
+ * This file defines the CSS design tokens for the Webview interfaces.
+ * It strictly uses VS Code theme variables to seamlessly adapt to Light, Dark,
+ * and High Contrast themes natively.
+ */
+
+ :root {
+    /* ── Base Color Palette (Adapted to VS Code Theme Variables) ── */
+    --ag-color-background: var(--vscode-editor-background, #ffffff);
+    --ag-color-surface: var(--vscode-sideBar-background, #f3f3f3);
+    --ag-color-surface-hover: var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+
+    /* Semantic Status Colors */
+    --ag-status-success: var(--vscode-testing-iconPassed, #22c55e);
+    --ag-status-warning: var(--vscode-editorWarning-foreground, #eab308);
+    --ag-status-danger: var(--vscode-errorForeground, #ef4444);
+    --ag-status-info: var(--vscode-textLink-foreground, #3b82f6);
+
+    /* ── Functional Variables ── */
+    
+    /* Backgrounds */
+    --bg-primary: var(--ag-color-background);
+    --bg-surface: var(--ag-color-surface);
+    --bg-surface-hover: var(--ag-color-surface-hover);
+
+    /* Typography */
+    --text-primary: var(--vscode-editor-foreground, #333333);
+    --text-secondary: var(--vscode-descriptionForeground, #666666);
+    --text-muted: var(--vscode-disabledForeground, #999999);
+
+    /* Borders */
+    --border-color: var(--vscode-widget-border, var(--vscode-panel-border, rgba(128,128,128,0.2)));
+    --border-focus: var(--vscode-focusBorder, #007acc);
+    --border-radius-sm: 4px;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+    --border-radius-full: 9999px;
+
+    /* Interactive Elements (Buttons, Inputs) */
+    --btn-primary-bg: var(--vscode-button-background, #007acc);
+    --btn-primary-hover: var(--vscode-button-hoverBackground, #0062a3);
+    --btn-primary-text: var(--vscode-button-foreground, #ffffff);
+    
+    --btn-secondary-bg: var(--vscode-button-secondaryBackground, transparent);
+    --btn-secondary-border: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.3));
+    --btn-secondary-hover: var(--vscode-button-secondaryHoverBackground, var(--ag-color-surface-hover));
+    --btn-secondary-text: var(--vscode-button-secondaryForeground, var(--text-primary));
+
+    /* Shadows & Effects */
+    --shadow-color: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.1));
+    --shadow-sm: 0 1px 2px 0 var(--shadow-color);
+    --shadow-md: 0 4px 6px -1px var(--shadow-color), 0 2px 4px -1px var(--shadow-color);
+    --shadow-glow: 0 0 15px rgba(128, 128, 128, 0.2); 
+
+    /* Transitions */
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* Typography Settings */
+    --font-family-base: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+    --font-size-xs: 0.75rem;
+    --font-size-sm: 0.875rem;
+    --font-size-base: 1rem;
+    --font-size-lg: 1.125rem;
+    --font-size-xl: 1.25rem;
+}
+
+/* 
+ * Apply base resets and global styles 
+ * Note: These are base styles for the Webview context.
+ */
+body {
+    background-color: transparent; /* Use VS Code's webview wrapper background naturally */
+    color: var(--text-primary);
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+    margin: 0;
+    padding: 1rem;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* RTL Support - Flips the layout if body has dir="rtl" */
+body[dir="rtl"] {
+    font-family: var(--font-family-base);
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+/* Base utility classes for layout / typography that can be used later */
+.text-gradient {
+    color: var(--text-primary);
+}
