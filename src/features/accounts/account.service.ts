@@ -288,6 +288,68 @@ export class AccountService {
   }
 
   /**
+   * Workflow: Re-authenticate an account with an expired token
+   * Runs the OAuth flow again for the SAME email, verifies identity,
+   * and updates stored tokens without losing any account data (alias, device profile, etc.).
+   */
+  async reAuthenticateWorkflow(email: string): Promise<void> {
+    const i18n = I18nService.getInstance();
+
+    try {
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: i18n.t('auth.reAuthenticating', { email }),
+        cancellable: false
+      }, async (progress) => {
+
+        // 1. Run the OAuth login flow (opens browser)
+        const { tokens, profile } = await this.authService.login();
+
+        // 2. SECURITY CHECK: Verify the returned email matches the original account
+        if (profile.email.toLowerCase() !== email.toLowerCase()) {
+          throw new Error(i18n.t('service.reAuthEmailMismatch', {
+            expected: email,
+            actual: profile.email
+          }));
+        }
+
+        progress.report({ message: i18n.t('common.loading') });
+
+        // 3. Update stored tokens (preserves all other account data)
+        const expiresAt = Math.floor(Date.now() / 1000) + tokens.expiresIn;
+        await this.accountRepo.storeTokens(email, {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: expiresAt
+        });
+
+        // 4. Update avatar if changed
+        if (profile.picture) {
+          await this.accountRepo.updateAccount(email, {
+            avatarUrl: profile.picture
+          });
+        }
+
+        // 5. Reset status back to ACTIVE
+        await this.accountRepo.updateAccount(email, {
+          status: AccountStatus.ACTIVE
+        });
+
+        Logger.getInstance().info(`Successfully re-authenticated ${email}`);
+        vscode.window.showInformationMessage(i18n.t('service.reAuthSuccess', { email }));
+
+        this._onAccountsChanged.fire();
+
+        // 6. Silently refresh balances in the background
+        this.refreshBalancesWorkflow(false).catch(() => {});
+      });
+    } catch (error: any) {
+      Logger.getInstance().error(`Re-authentication failed for ${email}`, error);
+      vscode.window.showErrorMessage(i18n.t('service.reAuthFailed', { email, error: error.message }));
+    }
+  }
+
+  /**
    * Workflow: Remove account
    * Prompts for confirmation and wipes data.
    */

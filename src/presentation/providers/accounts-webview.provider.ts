@@ -13,10 +13,11 @@ import { IAccountRepository } from '../../core/domain/repositories/account.repos
 import { AccountService } from '../../features/accounts/account.service';
 import { I18nService } from '../../i18n/i18n.service';
 import { Logger } from '../../core/utils/logger';
-import { Account, AccountTokens } from '../../core/domain/models/account.model';
+import { Account, AccountTokens, AccountStatus } from '../../core/domain/models/account.model';
 import { DeviceProfile } from '../../core/domain/models/device-profile.model';
+import { CryptoUtils } from '../../core/utils/crypto.utils';
 
-/** Shape of the exported backup file (before base64 encoding) */
+/** Shape of an individual account inside the backup */
 interface ExportedAccount {
   email: string;
   account: Account;
@@ -24,7 +25,23 @@ interface ExportedAccount {
   deviceProfile: DeviceProfile | null;
 }
 
+/** Inner payload (the data that gets encrypted) */
 interface ExportPayload {
+  _format: 'antigravity-hub-backup';
+  _version: 2;
+  exportedAt: string;
+  accounts: ExportedAccount[];
+}
+
+/** Outer envelope written to the file (v2 = encrypted) */
+interface EncryptedEnvelope {
+  _format: 'antigravity-hub-backup';
+  _version: 2;
+  encrypted: string; // AES-256-GCM ciphertext (salt:iv:authTag:data)
+}
+
+/** Legacy v1 format (unencrypted, for backward compatibility) */
+interface LegacyExportPayload {
   _format: 'antigravity-hub-backup';
   _version: 1;
   exportedAt: string;
@@ -82,6 +99,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         case 'deleteAccount':
           if (message.email) {
             await this.accountService.removeAccountWorkflow(message.email);
+          }
+          break;
+        case 'reAuthenticate':
+          if (message.email) {
+            await this.accountService.reAuthenticateWorkflow(message.email);
           }
           break;
         case 'refreshAccounts':
@@ -167,8 +189,36 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      // ── Step 1: Ask user for an encryption password ──
+      const password = await vscode.window.showInputBox({
+        prompt: i18n.t('accounts.exportPasswordPrompt'),
+        password: true,
+        placeHolder: i18n.t('accounts.exportPasswordPlaceholder'),
+        validateInput: (value) => {
+          if (!value || value.length < 6) {
+            return i18n.t('accounts.passwordTooShort');
+          }
+          return undefined;
+        }
+      });
+
+      if (!password) return; // User cancelled
+
+      // ── Step 2: Confirm password ──
+      const confirmPassword = await vscode.window.showInputBox({
+        prompt: i18n.t('accounts.exportPasswordConfirm'),
+        password: true,
+        placeHolder: i18n.t('accounts.exportPasswordPlaceholder'),
+      });
+
+      if (confirmPassword !== password) {
+        vscode.window.showErrorMessage(i18n.t('accounts.passwordMismatch'));
+        return;
+      }
+
       this._view?.webview.postMessage({ command: 'showLoading', text: i18n.t('accounts.preparingExport') });
 
+      // ── Step 3: Collect account data ──
       const exportedAccounts: ExportedAccount[] = [];
       for (const acc of accounts) {
         const tokens = await this.accountRepo.getTokens(acc.email);
@@ -191,17 +241,24 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      // ── Step 4: Build and encrypt the payload ──
       const payload: ExportPayload = {
         _format: 'antigravity-hub-backup',
-        _version: 1,
+        _version: 2,
         exportedAt: new Date().toISOString(),
         accounts: exportedAccounts,
       };
 
       const jsonStr = JSON.stringify(payload);
-      const base64Content = Buffer.from(jsonStr, 'utf-8').toString('base64');
+      const encryptedContent = CryptoUtils.encryptWithPassword(jsonStr, password);
 
-      // Determine default save location
+      const envelope: EncryptedEnvelope = {
+        _format: 'antigravity-hub-backup',
+        _version: 2,
+        encrypted: encryptedContent,
+      };
+
+      // ── Step 5: Save to file ──
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
       const defaultUri = workspaceFolder
         ? vscode.Uri.joinPath(workspaceFolder, 'antigravity-backup.json')
@@ -218,9 +275,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       if (!saveUri) return; // User cancelled
 
       const fs = require('fs');
-      fs.writeFileSync(saveUri.fsPath, base64Content, 'utf-8');
+      fs.writeFileSync(saveUri.fsPath, JSON.stringify(envelope), 'utf-8');
 
-      logger.info(`Exported ${exportedAccounts.length} accounts to ${saveUri.fsPath}`);
+      logger.info(`Exported ${exportedAccounts.length} accounts (encrypted) to ${saveUri.fsPath}`);
       vscode.window.showInformationMessage(i18n.t('accounts.exportSuccess', { count: exportedAccounts.length }));
     } catch (error: any) {
       this._view?.webview.postMessage({ command: 'hideLoading' });
@@ -248,21 +305,67 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       const fs = require('fs');
       const rawContent = fs.readFileSync(fileUris[0].fsPath, 'utf-8');
 
-      // Decode base64
+      // ── Detect format and decode ──
       let payload: ExportPayload;
+
       try {
-        const jsonStr = Buffer.from(rawContent, 'base64').toString('utf-8');
-        payload = JSON.parse(jsonStr);
-      } catch {
-        this._view?.webview.postMessage({ command: 'hideLoading' });
-        vscode.window.showErrorMessage(i18n.t('accounts.invalidFile'));
-        return;
+        // Try parsing as JSON first (v2 encrypted envelope or raw JSON)
+        const parsed = JSON.parse(rawContent);
+
+        if (parsed._format === 'antigravity-hub-backup' && parsed._version === 2 && parsed.encrypted) {
+          // ── v2 Encrypted format ──
+          const password = await vscode.window.showInputBox({
+            prompt: i18n.t('accounts.importPasswordPrompt'),
+            password: true,
+            placeHolder: i18n.t('accounts.importPasswordPlaceholder'),
+          });
+
+          if (!password) {
+            this._view?.webview.postMessage({ command: 'hideLoading' });
+            return; // User cancelled
+          }
+
+          try {
+            const decrypted = CryptoUtils.decryptWithPassword(parsed.encrypted, password);
+            payload = JSON.parse(decrypted);
+          } catch {
+            this._view?.webview.postMessage({ command: 'hideLoading' });
+            vscode.window.showErrorMessage(i18n.t('accounts.wrongPassword'));
+            return;
+          }
+        } else if (parsed._format === 'antigravity-hub-backup' && parsed._version === 1) {
+          // ── v1 Legacy unencrypted (already parsed as JSON) ──
+          vscode.window.showWarningMessage(i18n.t('accounts.legacyFormatWarning'));
+          payload = parsed as ExportPayload;
+          // Override version for internal consistency
+          (payload as any)._version = 2;
+        } else {
+          throw new Error('Unknown format');
+        }
+      } catch (jsonError) {
+        // ── Fallback: Try legacy Base64 decode (v1 oldest format) ──
+        try {
+          const jsonStr = Buffer.from(rawContent, 'base64').toString('utf-8');
+          const legacyPayload = JSON.parse(jsonStr) as LegacyExportPayload;
+
+          if (legacyPayload._format === 'antigravity-hub-backup' && legacyPayload._version === 1) {
+            vscode.window.showWarningMessage(i18n.t('accounts.legacyFormatWarning'));
+            payload = legacyPayload as unknown as ExportPayload;
+          } else {
+            this._view?.webview.postMessage({ command: 'hideLoading' });
+            vscode.window.showErrorMessage(i18n.t('accounts.invalidFile'));
+            return;
+          }
+        } catch {
+          this._view?.webview.postMessage({ command: 'hideLoading' });
+          vscode.window.showErrorMessage(i18n.t('accounts.invalidFile'));
+          return;
+        }
       }
 
-      // Validate structure
+      // ── Validate structure ──
       if (
         payload._format !== 'antigravity-hub-backup' ||
-        payload._version !== 1 ||
         !Array.isArray(payload.accounts) ||
         payload.accounts.length === 0
       ) {
@@ -687,19 +790,23 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
          `;
       }
 
-      const activeBadge = acc.isActive ? `<div class="badge active-badge">${i18n.t('accounts.active')}</div>` : '';
+      const isExpired = acc.status === AccountStatus.TOKEN_EXPIRED;
+      const activeBadge = acc.isActive
+        ? `<div class="badge active-badge">${i18n.t('accounts.active')}</div>`
+        : isExpired
+          ? `<div class="badge expired-badge">${i18n.t('accounts.expired')}</div>`
+          : '';
 
-      return `
-        <div class="account-card ${acc.isActive ? 'active' : ''}">
-          <div class="card-header">
-            ${acc.avatarUrl ? `<img class="avatar" src="${acc.avatarUrl}" alt="${acc.displayName}" />` : `<div class="avatar">${acc.displayName.charAt(0).toUpperCase()}</div>`}
-            <div class="user-info">
-              <h4>${acc.displayName}</h4>
-              <p>${acc.email}</p>
-            </div>
-            ${activeBadge}
-          </div>
-          
+      // For expired accounts, show a warning banner instead of models
+      const expiredBannerHtml = isExpired ? `
+        <div class="expired-banner">
+          <span class="expired-banner-icon">⚠️</span>
+          <span class="expired-banner-text">${i18n.t('accounts.expiredBanner')}</span>
+        </div>
+      ` : '';
+
+      // Build card body: models section only for non-expired accounts
+      const cardBody = isExpired ? expiredBannerHtml : `
           ${creditsHtml}
           
           <div class="models-section">
@@ -712,10 +819,37 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               </div>
             </div>
           </div>
+      `;
+
+      // Build card actions: re-authenticate for expired, activate for normal
+      let actionsHtml = '';
+      if (isExpired) {
+        actionsHtml = `
+          <button class="btn btn-warning" onclick="sendMessage('reAuthenticate', '${acc.email}')">${i18n.t('accounts.reAuthenticate')}</button>
+          <button class="btn btn-danger" onclick="sendMessage('deleteAccount', '${acc.email}')">${i18n.t('accounts.remove')}</button>
+        `;
+      } else {
+        actionsHtml = `
+          ${!acc.isActive ? `<button class="btn btn-primary" onclick="handleSwitchAccount(this, '${acc.email}')">${i18n.t('accounts.activate')}</button>` : ''}
+          <button class="btn btn-danger" onclick="sendMessage('deleteAccount', '${acc.email}')">${i18n.t('accounts.remove')}</button>
+        `;
+      }
+
+      return `
+        <div class="account-card ${acc.isActive ? 'active' : ''} ${isExpired ? 'expired' : ''}">
+          <div class="card-header">
+            ${acc.avatarUrl ? `<img class="avatar ${isExpired ? 'avatar-expired' : ''}" src="${acc.avatarUrl}" alt="${acc.displayName}" />` : `<div class="avatar ${isExpired ? 'avatar-expired' : ''}">${acc.displayName.charAt(0).toUpperCase()}</div>`}
+            <div class="user-info">
+              <h4>${acc.displayName}</h4>
+              <p>${acc.email}</p>
+            </div>
+            ${activeBadge}
+          </div>
+          
+          ${cardBody}
 
           <div class="card-actions">
-            ${!acc.isActive ? `<button class="btn btn-primary" onclick="handleSwitchAccount(this, '${acc.email}')">${i18n.t('accounts.activate')}</button>` : ''}
-            <button class="btn btn-danger" onclick="sendMessage('deleteAccount', '${acc.email}')">${i18n.t('accounts.remove')}</button>
+            ${actionsHtml}
           </div>
         </div>
       `;
@@ -1202,6 +1336,63 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           .btn-danger:hover {
             background: var(--danger-color);
             color: var(--vscode-button-foreground, white);
+          }
+
+          .btn-warning {
+            background: var(--warning-color);
+            color: var(--vscode-editor-background, #1e1e1e);
+            border: 1px solid var(--warning-color);
+            font-weight: 600;
+          }
+          .btn-warning:hover {
+            filter: brightness(1.15);
+            box-shadow: 0 2px 8px var(--shadow-color);
+          }
+
+          .account-card.expired {
+            border: 1px solid var(--warning-color);
+            opacity: 0.92;
+          }
+          .account-card.expired:hover {
+            border-color: var(--warning-color);
+          }
+
+          .avatar-expired {
+            opacity: 0.5;
+            filter: grayscale(60%);
+          }
+
+          .expired-badge {
+            background: var(--glass-bg);
+            color: var(--warning-color);
+            border: 1px solid var(--warning-color);
+            white-space: nowrap;
+          }
+
+          .expired-banner {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            background: rgba(204, 167, 0, 0.08);
+            border: 1px solid rgba(204, 167, 0, 0.3);
+            border-radius: 8px;
+            animation: subtlePulse 3s ease-in-out infinite;
+          }
+          .expired-banner-icon {
+            font-size: 1.4rem;
+            flex-shrink: 0;
+          }
+          .expired-banner-text {
+            font-size: 0.82rem;
+            color: var(--warning-color);
+            line-height: 1.4;
+          }
+
+          @keyframes subtlePulse {
+            0%, 100% { border-color: rgba(204, 167, 0, 0.3); }
+            50% { border-color: rgba(204, 167, 0, 0.6); }
           }
 
           .empty-state {

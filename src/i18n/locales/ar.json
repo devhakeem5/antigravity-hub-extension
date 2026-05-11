@@ -82,8 +82,17 @@
     "preparingExport": "جارٍ تجهيز بيانات التصدير...",
     "noValidExportData": "لم يتم العثور على بيانات صالحة للتصدير.",
     "saveBackup": "حفظ النسخة الاحتياطية",
-    "exportSuccess": "✅ تم تصدير {{count}} حساب بنجاح.",
+    "exportSuccess": "✅ تم تصدير {{count}} حساب بنجاح (مشفر).",
     "exportFailed": "❌ فشل التصدير: {{error}}",
+    "exportPasswordPrompt": "أدخل كلمة مرور لحماية النسخة الاحتياطية (6 أحرف على الأقل)",
+    "exportPasswordPlaceholder": "أدخل كلمة مرور النسخة الاحتياطية",
+    "exportPasswordConfirm": "أعد إدخال كلمة المرور للتأكيد",
+    "passwordTooShort": "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
+    "passwordMismatch": "❌ كلمتا المرور غير متطابقتين. تم إلغاء التصدير.",
+    "importPasswordPrompt": "أدخل كلمة المرور المستخدمة لتشفير هذه النسخة الاحتياطية",
+    "importPasswordPlaceholder": "أدخل كلمة مرور النسخة الاحتياطية",
+    "wrongPassword": "❌ كلمة المرور خاطئة أو الملف تالف. حاول مرة أخرى.",
+    "legacyFormatWarning": "⚠️ هذه النسخة الاحتياطية بصيغة قديمة غير مشفرة. يُنصح بإعادة التصدير بالصيغة المشفرة الجديدة لأمان أفضل.",
     "selectBackup": "اختر ملف النسخة الاحتياطية",
     "verifyingFile": "جارٍ التحقق من الملف...",
     "invalidFile": "❌ الملف المحدد غير صالح أو تالف.",
@@ -99,6 +108,8 @@
     "availableModels": "النماذج المتاحة ({{count}})",
     "activate": "تنشيط",
     "remove": "إزالة",
+    "reAuthenticate": "إعادة تسجيل الدخول",
+    "expiredBanner": "انتهت صلاحية الجلسة. يرجى إعادة تسجيل الدخول لاستعادة الوصول.",
     "noAvailableModels": "لا توجد نماذج متاحة",
     "noAccountsRegistered": "لا توجد حسابات مسجلة بعد.",
     "addNewAccount": "➕ إضافة حساب جديد",
@@ -125,7 +136,8 @@
     "waitingForBrowser": "في انتظار المصادقة من المتصفح...",
     "authSuccess": "تمت المصادقة بنجاح!",
     "authFailed": "فشلت المصادقة. يرجى المحاولة مرة أخرى.",
-    "browserOpened": "تم فتح نافذة المتصفح لتسجيل الدخول."
+    "browserOpened": "تم فتح نافذة المتصفح لتسجيل الدخول.",
+    "reAuthenticating": "جارٍ إعادة المصادقة لـ {{email}}..."
   },
   "settings": {
     "title": "الإعدادات",
@@ -172,7 +184,10 @@
     "refreshInProgress": "⏳ عملية تحديث الأرصدة قيد التنفيذ بالفعل...",
     "refreshCooldown": "⏳ يرجى الانتظار {{seconds}} ثانية قبل التحديث مرة أخرى.",
     "accountRemoved": "تمت إزالة الحساب {{email}} وجميع بياناته بنجاح.",
-    "switchFailed": "فشل التبديل إلى الحساب {{email}}. يرجى التحقق من الأخطاء والمحاولة مجدداً."
+    "switchFailed": "فشل التبديل إلى الحساب {{email}}. يرجى التحقق من الأخطاء والمحاولة مجدداً.",
+    "reAuthSuccess": "✅ تم استعادة الجلسة بنجاح لـ {{email}}.",
+    "reAuthFailed": "❌ فشلت إعادة المصادقة لـ {{email}}: {{error}}",
+    "reAuthEmailMismatch": "الحساب الذي سجلت الدخول به ({{actual}}) لا يتطابق مع الحساب المتوقع ({{expected}}). يرجى تسجيل الدخول بحساب Google الصحيح."
   },
   "stateDb": {
     "outdatedAntigravity": "إصدار Antigravity المثبت أقدم من {{minVersion}} وغير مدعوم.\nيرجى تحديث Antigravity إلى الإصدار {{minVersion}} أو أحدث لاستخدام ميزة تبديل الحسابات.",

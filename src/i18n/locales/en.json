@@ -82,8 +82,17 @@
     "preparingExport": "Preparing export data...",
     "noValidExportData": "No valid data found to export.",
     "saveBackup": "Save Backup",
-    "exportSuccess": "✅ Successfully exported {{count}} accounts.",
+    "exportSuccess": "✅ Successfully exported {{count}} accounts (encrypted).",
     "exportFailed": "❌ Export failed: {{error}}",
+    "exportPasswordPrompt": "Set a password to protect this backup (min 6 characters)",
+    "exportPasswordPlaceholder": "Enter backup password",
+    "exportPasswordConfirm": "Confirm the backup password",
+    "passwordTooShort": "Password must be at least 6 characters",
+    "passwordMismatch": "❌ Passwords do not match. Export cancelled.",
+    "importPasswordPrompt": "Enter the password used to encrypt this backup",
+    "importPasswordPlaceholder": "Enter backup password",
+    "wrongPassword": "❌ Wrong password or corrupted file. Please try again.",
+    "legacyFormatWarning": "⚠️ This backup uses an older unencrypted format. Consider re-exporting with the new encrypted format for better security.",
     "selectBackup": "Select Backup File",
     "verifyingFile": "Verifying file...",
     "invalidFile": "❌ The selected file is invalid or corrupted.",
@@ -99,6 +108,8 @@
     "availableModels": "Available Models ({{count}})",
     "activate": "Activate",
     "remove": "Remove",
+    "reAuthenticate": "Re-sign in",
+    "expiredBanner": "Session expired. Please sign in again to restore access.",
     "noAvailableModels": "No models available",
     "noAccountsRegistered": "No accounts registered yet.",
     "addNewAccount": "➕ Add New Account",
@@ -125,7 +136,8 @@
     "waitingForBrowser": "Waiting for browser authentication...",
     "authSuccess": "Successfully authenticated!",
     "authFailed": "Authentication failed. Please try again.",
-    "browserOpened": "A browser window has been opened for sign-in."
+    "browserOpened": "A browser window has been opened for sign-in.",
+    "reAuthenticating": "Re-authenticating {{email}}..."
   },
   "settings": {
     "title": "Settings",
@@ -172,7 +184,10 @@
     "refreshInProgress": "⏳ Balance refresh is already in progress...",
     "refreshCooldown": "⏳ Please wait {{seconds}} seconds before refreshing again.",
     "accountRemoved": "Account {{email}} and all its data removed successfully.",
-    "switchFailed": "Failed to switch to account {{email}}. Please check errors and try again."
+    "switchFailed": "Failed to switch to account {{email}}. Please check errors and try again.",
+    "reAuthSuccess": "✅ Session restored successfully for {{email}}.",
+    "reAuthFailed": "❌ Re-authentication failed for {{email}}: {{error}}",
+    "reAuthEmailMismatch": "The signed-in account ({{actual}}) does not match the expected account ({{expected}}). Please sign in with the correct Google account."
   },
   "stateDb": {
     "outdatedAntigravity": "Installed Antigravity version is older than {{minVersion}} and not supported.\nPlease update Antigravity to version {{minVersion}} or newer to use account switching.",
