@@ -94,7 +94,16 @@ export class StateDbService {
         rows.push({ key: STATE_DB_KEYS.ENTERPRISE_PREFS, value: enterpriseEntry });
       }
       if (deviceProfile) {
+        // Inject ALL telemetry fingerprint keys to prevent cross-account correlation.
+        // Without this, shared values (e.g. firstSessionDate, storage.serviceMachineId)
+        // allow Google to link multiple accounts to the same physical device.
         rows.push({ key: STATE_DB_KEYS.TELEMETRY_SERVICE_MACHINE_ID, value: deviceProfile.macMachineId });
+        rows.push({ key: STATE_DB_KEYS.STORAGE_SERVICE_MACHINE_ID, value: deviceProfile.devDeviceId });
+        rows.push({ key: STATE_DB_KEYS.TELEMETRY_FIRST_SESSION_DATE, value: deviceProfile.firstSessionDate });
+        // Reset current/last session dates to "now" so each switch looks like a fresh session
+        const nowUtc = new Date().toUTCString();
+        rows.push({ key: STATE_DB_KEYS.TELEMETRY_CURRENT_SESSION_DATE, value: nowUtc });
+        rows.push({ key: STATE_DB_KEYS.TELEMETRY_LAST_SESSION_DATE, value: nowUtc });
       }
 
       // ── Step 4: Spawn background worker + close window ──

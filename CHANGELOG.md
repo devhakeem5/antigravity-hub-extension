@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - **Encrypted Backups**: Exported backup files are now securely encrypted with a user-chosen password to protect sensitive account data.
 - **Strict Verification**: Added safety checks during re-authentication to prevent accidental account mix-ups.
+- **Device Fingerprint Isolation**: Extended per-account device profile injection to cover all telemetry identifiers (`storage.serviceMachineId`, `telemetry.firstSessionDate`, session timestamps) that were previously shared across accounts and could be used for cross-account correlation.
+- **Session Date Spoofing**: Each account now receives a unique, plausible first-session date to prevent fingerprinting via matching installation timestamps.
 
 ### Changed
 - Improved UI visibility for expired accounts with a distinct warning style.

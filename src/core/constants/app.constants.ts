@@ -68,6 +68,10 @@ export const STATE_DB_KEYS = {
   ONBOARDING: 'antigravityOnboarding',
   LEGACY: 'google.antigravity',
   TELEMETRY_SERVICE_MACHINE_ID: 'telemetry.serviceMachineId',
+  STORAGE_SERVICE_MACHINE_ID: 'storage.serviceMachineId',
+  TELEMETRY_FIRST_SESSION_DATE: 'telemetry.firstSessionDate',
+  TELEMETRY_LAST_SESSION_DATE: 'telemetry.lastSessionDate',
+  TELEMETRY_CURRENT_SESSION_DATE: 'telemetry.currentSessionDate',
 } as const;
 
 // ── Protobuf Sentinel Keys ──

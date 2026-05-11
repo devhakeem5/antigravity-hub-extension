@@ -17,6 +17,8 @@ export interface DeviceProfile {
   devDeviceId: string;
   /** UUID uppercase in braces: "{XXXXXXXX-XXXX-...}" */
   sqmId: string;
+  /** Unique "first session" date per account to prevent session date correlation */
+  firstSessionDate: string;
 }
 
 /**
@@ -29,5 +31,21 @@ export function generateDeviceProfile(): DeviceProfile {
     macMachineId: crypto.randomUUID(),
     devDeviceId: crypto.randomUUID(),
     sqmId: `{${crypto.randomUUID().toUpperCase()}}`,
+    firstSessionDate: generatePlausibleFirstSessionDate(),
   };
+}
+
+/**
+ * Generates a plausible "first session" date string for a new account.
+ * Random date between 30 and 90 days in the past (UTC), formatted as
+ * the HTTP date string Antigravity uses (e.g. "Tue, 21 Apr 2026 02:20:41 GMT").
+ */
+export function generatePlausibleFirstSessionDate(): string {
+  const now = Date.now();
+  const minDaysAgo = 30;
+  const maxDaysAgo = 90;
+  const daysAgo = minDaysAgo + Math.floor(Math.random() * (maxDaysAgo - minDaysAgo + 1));
+  const randomMs = Math.floor(Math.random() * 86400000); // random time within the day
+  const date = new Date(now - daysAgo * 86400000 + randomMs);
+  return date.toUTCString();
 }

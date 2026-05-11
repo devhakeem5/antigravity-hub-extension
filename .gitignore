@@ -5,3 +5,4 @@ dist/
 *.vsix
 antigravity-backup.json
 end-report.md
+security-tips.md

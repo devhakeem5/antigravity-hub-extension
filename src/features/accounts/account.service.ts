@@ -162,6 +162,13 @@ export class AccountService {
       Logger.getInstance().info(`No device profile found for ${email}. Generating one now...`);
       deviceProfile = generateDeviceProfile();
       await this.accountRepo.storeDeviceProfile(email, deviceProfile);
+    } else if (!deviceProfile.firstSessionDate) {
+      // Backward compatibility: older profiles lack firstSessionDate.
+      // Generate only the missing field; keep all other IDs stable.
+      const { generatePlausibleFirstSessionDate } = await import('../../core/domain/models/device-profile.model');
+      deviceProfile.firstSessionDate = generatePlausibleFirstSessionDate();
+      await this.accountRepo.storeDeviceProfile(email, deviceProfile);
+      Logger.getInstance().info(`Migrated device profile for ${email}: added firstSessionDate.`);
     }
 
     // Inject into Database (tokens + device profile + telemetry)
