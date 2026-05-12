@@ -42,7 +42,11 @@ export class StatusBarProvider implements vscode.Disposable {
       return;
     }
 
-    const activeAccount = await this.accountRepo.getAccount(activeEmail);
+    const activeAccount = await this.accountRepo.getAccount(activeEmail)
+      // Fallback: case-insensitive search if exact match fails
+      || (await this.accountRepo.getAllAccounts()).find(
+        a => a.email.toLowerCase() === activeEmail.toLowerCase()
+      ) || null;
     if (!activeAccount) {
       this.statusBarItem.hide();
       return;

@@ -134,13 +134,18 @@ function registerCommands(
         return;
       }
 
+      // Dynamically detect the active account from Antigravity's state.vscdb
+      const activeEmail = await accountService.getActiveAntigravityEmail();
+      const activeEmailLower = activeEmail?.toLowerCase() ?? null;
+
       const items = accounts.map(a => {
+        const isActive = activeEmailLower !== null && a.email.toLowerCase() === activeEmailLower;
         let creditsStr = '?';
         if (a.balances && Object.keys(a.balances).length > 0) {
           creditsStr = Object.values(a.balances).join('/');
         }
         return {
-          label: `${a.isActive ? '✅ ' : ''}${a.displayName}`,
+          label: `${isActive ? '✅ ' : ''}${a.displayName}`,
           description: `${creditsStr} Credits`,
           email: a.email
         };

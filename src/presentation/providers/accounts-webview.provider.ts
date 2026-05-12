@@ -470,10 +470,20 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const accounts = await this.accountRepo.getAccountSummaries();
 
     // ── Dynamically determine Active Account from Antigravity DB ──
+    // Always read the real active account from Antigravity's state.vscdb,
+    // regardless of what the local DB thinks is active.
     const activeEmail = await this.accountService.getActiveAntigravityEmail();
+    const activeEmailLower = activeEmail?.toLowerCase() ?? null;
+    
+    // Reset ALL accounts' isActive flag based on the live Antigravity state
     accounts.forEach(acc => {
-      acc.isActive = (activeEmail && acc.email === activeEmail) ? true : false;
+      acc.isActive = (activeEmailLower !== null && acc.email.toLowerCase() === activeEmailLower);
     });
+    
+    // Debug: log if active email was found but didn't match any stored account
+    if (activeEmail && !accounts.some(a => a.isActive)) {
+      Logger.getInstance().info(`Active Antigravity email "${activeEmail}" does not match any stored account.`);
+    }
 
     // ── Preferred Model Resolution ──
     // Extract available model keys from first account with balances (after filtering)
