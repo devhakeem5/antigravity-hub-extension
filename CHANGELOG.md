@@ -8,30 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.3] - 2026-05-11
 
 ### Added
-- **Session Re-authentication**: Easily restore access to accounts with expired sessions via a new "Re-sign in" button, eliminating the need to re-add accounts.
+- **Session Re-authentication**: "Re-sign in" button for expired sessions — no need to remove and re-add accounts.
+- **Encrypted Backups**: Backup files are now password-encrypted. Legacy unencrypted imports still supported.
 
-### Security
-- **Encrypted Backups**: Exported backup files are now securely encrypted with a user-chosen password to protect sensitive account data.
-- **Strict Verification**: Added safety checks during re-authentication to prevent accidental account mix-ups.
-- **Device Fingerprint Isolation**: Extended per-account device profile injection to cover all telemetry identifiers (`storage.serviceMachineId`, `telemetry.firstSessionDate`, session timestamps) that were previously shared across accounts and could be used for cross-account correlation.
-- **Session Date Spoofing**: Each account now receives a unique, plausible first-session date to prevent fingerprinting via matching installation timestamps.
+### Fixed
+- **Active Account Detection**: Active account now correctly detected on launch regardless of how it was activated.
 
 ### Changed
-- Improved UI visibility for expired accounts with a distinct warning style.
-- Legacy unencrypted backups remain supported for import, but will display a security warning.
+- **Inline Balance Refresh**: Per-account loading indicator replaces the full-screen overlay. Buttons are disabled during refresh with a cancellable confirmation dialog.
+- Expired accounts now have a distinct visual warning style.
+
+### Security
+- **Device Fingerprint Isolation**: Each account gets a fully unique set of telemetry identifiers to prevent cross-account correlation.
+- Re-authentication now verifies email match to prevent accidental account mix-ups.
 
 ## [0.1.2] - 2026-05-10
 
 ### Added
-- **Profile Pictures**: User profile images are now fetched and displayed alongside each account in the account manager sidebar for better visual identification.
+- **Profile Pictures**: Account avatars are now displayed in the sidebar.
 
 ### Improved
-- **Active Account Synchronization**: Enhanced the accuracy of active account detection to perfectly synchronize with Antigravity in real-time, even when accounts are switched externally. The active account is now automatically pinned to the top of the list.
+- **Active Account Sync**: Active account is detected from Antigravity's internal state and pinned to the top of the list.
 
 ## [0.1.1] - 2026-05-09
 
 ### Added
-- Initial public release of Antigravity Hub with core account management features.
-- OAuth-based login and token management.
-- Multi-language support (English and Arabic).
-- Custom UI themes matching VS Code.
+- Initial release with core account management, OAuth login, multi-language support (EN/AR), and VS Code theme integration.

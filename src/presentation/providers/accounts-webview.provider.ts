@@ -63,6 +63,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /** AbortController for the current refresh cycle (null = not refreshing) */
+  private _refreshAbortController: AbortController | null = null;
+
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
     context: vscode.WebviewViewResolveContext,
@@ -107,11 +110,13 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         case 'refreshAccounts':
-          this._view?.webview.postMessage({ command: 'showLoading', text: i18n.t('accounts.refreshingBalances') });
-          try {
-            await this.accountService.refreshBalancesWorkflow(true);
-          } finally {
-            this._view?.webview.postMessage({ command: 'hideLoading' });
+          await this.handleProgressiveRefresh();
+          break;
+        case 'cancelRefresh':
+          if (this._refreshAbortController) {
+            this._refreshAbortController.abort();
+            this._refreshAbortController = null;
+            Logger.getInstance().info('Refresh abort signal sent by user.');
           }
           break;
         case 'switchModel':
@@ -157,12 +162,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         const fiveMinutesMs = 5 * 60 * 1000;
         
         if (now - lastRefreshed > fiveMinutesMs) {
-          this._view?.webview.postMessage({ command: 'showLoading', text: i18n.t('accounts.refreshingBalances') });
-          try {
-            await this.accountService.refreshBalancesWorkflow(false); // false = no toast notification for auto-refresh
-          } finally {
-            this._view?.webview.postMessage({ command: 'hideLoading' });
-          }
+          await this.handleProgressiveRefresh(false);
         }
       }
     });
@@ -174,6 +174,47 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
   public async refresh() {
     if (this._view) {
       this._view.webview.html = await this._getHtmlForWebview(this._view.webview);
+    }
+  }
+
+  // ─── Progressive Refresh Handler ──────────────────────────────────────────
+
+  /**
+   * Refreshes all account balances progressively.
+   * Sends per-account start/done messages to the webview so the UI can
+   * show a small loading indicator on each card individually instead of
+   * a full-screen overlay.
+   */
+  private async handleProgressiveRefresh(notify: boolean = true): Promise<void> {
+    // Step 0: Re-detect active account from Antigravity's state.vscdb
+    // and re-render the UI so active badge & card order are correct before refresh
+    await this.refresh();
+
+    // Create abort controller for this refresh cycle
+    this._refreshAbortController = new AbortController();
+    const signal = this._refreshAbortController.signal;
+
+    // Tell webview to disable all buttons and show cancel
+    this._view?.webview.postMessage({ command: 'refreshStarted' });
+
+    try {
+      await this.accountService.refreshBalancesWorkflow(notify, {
+        signal,
+        onAccountStart: (email: string) => {
+          this._view?.webview.postMessage({ command: 'accountRefreshStart', email });
+        },
+        onAccountDone: (email: string, updatedBalances?: Record<string, any>, updatedStatus?: string) => {
+          this._view?.webview.postMessage({ command: 'accountRefreshDone', email, balances: updatedBalances, status: updatedStatus });
+        },
+        onComplete: () => {
+          // Full re-render to apply re-sorting after all accounts are done
+          this.refresh();
+        }
+      });
+    } finally {
+      this._refreshAbortController = null;
+      // Always tell webview to re-enable UI (even on cancel/error)
+      this._view?.webview.postMessage({ command: 'refreshFinished' });
     }
   }
 
@@ -846,7 +887,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       }
 
       return `
-        <div class="account-card ${acc.isActive ? 'active' : ''} ${isExpired ? 'expired' : ''}">
+        <div class="account-card ${acc.isActive ? 'active' : ''} ${isExpired ? 'expired' : ''}" data-email="${acc.email}">
+          <div class="card-refresh-indicator" style="display:none;"><div class="card-spinner"></div><span>${i18n.t('accounts.updatingAccount')}</span></div>
           <div class="card-header">
             ${acc.avatarUrl ? `<img class="avatar ${isExpired ? 'avatar-expired' : ''}" src="${acc.avatarUrl}" alt="${acc.displayName}" />` : `<div class="avatar ${isExpired ? 'avatar-expired' : ''}">${acc.displayName.charAt(0).toUpperCase()}</div>`}
             <div class="user-info">
@@ -1445,7 +1487,95 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             .badge { font-size: 0.6rem; padding: 3px 6px; }
           }
 
-          /* ── Loading Overlay ── */
+          /* ── Per-card refresh indicator ── */
+          .card-refresh-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            margin-bottom: 10px;
+            background: var(--glass-bg);
+            border: 1px solid var(--focus-border);
+            border-radius: 6px;
+            font-size: 0.78rem;
+            color: var(--primary-light);
+            animation: fadeIn 0.2s ease;
+          }
+          .card-spinner {
+            width: 14px; height: 14px;
+            border: 2px solid var(--glass-border);
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            flex-shrink: 0;
+          }
+          @keyframes spin { to { transform: rotate(360deg); } }
+
+          /* ── Cancel / Loading bar in header ── */
+          .btn-cancel-refresh {
+            background: var(--danger-color);
+            color: var(--vscode-button-foreground, #fff);
+            border: none;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            display: none;
+            align-items: center;
+            gap: 4px;
+            animation: fadeIn 0.15s ease;
+          }
+          .btn-cancel-refresh:hover { filter: brightness(1.15); }
+
+          /* ── Cancel Confirmation Dialog ── */
+          .cancel-confirm-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 1100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.15s ease;
+          }
+          .cancel-confirm-box {
+            background: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-widget-border, var(--border-color));
+            border-radius: 10px;
+            padding: 20px 24px;
+            min-width: 220px;
+            max-width: 320px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            text-align: center;
+          }
+          .cancel-confirm-box h4 {
+            margin: 0 0 8px 0;
+            font-size: 0.95rem;
+            color: var(--text-primary);
+          }
+          .cancel-confirm-box p {
+            margin: 0 0 16px 0;
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+          }
+          .cancel-confirm-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+          }
+          .cancel-confirm-actions .btn { min-width: 80px; }
+
+          /* Disabled state for all action buttons during refresh */
+          .actions-disabled .btn,
+          .actions-disabled .btn-icon,
+          .actions-disabled .dropdown-item {
+            opacity: 0.4;
+            pointer-events: none;
+            cursor: not-allowed;
+          }
+
+          /* Loading overlay for export/import only */
           .loading-overlay {
             position: fixed;
             inset: 0;
@@ -1466,7 +1596,6 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
           }
-          @keyframes spin { to { transform: rotate(360deg); } }
           .loading-text {
             color: var(--text-secondary);
             font-size: 0.85rem;
@@ -1523,8 +1652,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         <div class="header-actions">
           <h2>${i18n.t('accounts.title')}</h2>
           <div style="display:flex;align-items:center;gap:4px;">
+            <button id="cancelRefreshBtn" class="btn-cancel-refresh" onclick="showCancelConfirm()" title="${i18n.t('accounts.cancelRefresh')}">✖ ${i18n.t('accounts.cancelRefresh')}</button>
             <button id="refreshBtn" class="btn-icon" onclick="handleRefresh()" title="${i18n.t('commands.refreshBalances.title')}">🔄</button>
-            <button class="btn-icon" onclick="sendMessage('addAccount')" title="${i18n.t('commands.addAccount.title')}">➕</button>
+            <button id="addBtn" class="btn-icon" onclick="sendMessage('addAccount')" title="${i18n.t('commands.addAccount.title')}">➕</button>
             <div class="menu-wrapper">
               <button class="btn-icon" onclick="toggleMenu(event)" title="${i18n.t('accounts.more')}" id="menuBtn">⋮</button>
               <div class="dropdown-menu" id="dropdownMenu">
@@ -1545,6 +1675,18 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
         <div id="accounts-list">
           ${accountCardsHtml}
+        </div>
+
+        <!-- Cancel Confirmation Dialog -->
+        <div id="cancelConfirmOverlay" class="cancel-confirm-overlay">
+          <div class="cancel-confirm-box">
+            <h4>${i18n.t('accounts.confirmCancelTitle')}</h4>
+            <p>${i18n.t('accounts.confirmCancelMessage')}</p>
+            <div class="cancel-confirm-actions">
+              <button class="btn btn-danger" onclick="confirmCancel()">${i18n.t('accounts.confirmCancelYes')}</button>
+              <button class="btn btn-primary" onclick="dismissCancelConfirm()">${i18n.t('accounts.confirmCancelNo')}</button>
+            </div>
+          </div>
         </div>
 
         <!-- Settings Modal -->
@@ -1606,37 +1748,23 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             sendMessage('switchAccount', email);
           }
 
-          // ── Refresh button with visual cooldown ──
-          let refreshCooldown = false;
+          // ── Refresh button ──
+          let isRefreshing = false;
           function handleRefresh() {
-            if (refreshCooldown) return;
-            refreshCooldown = true;
-            
-            const btn = document.getElementById('refreshBtn');
-            if (!btn) return;
-            
-            btn.disabled = true;
-            btn.style.opacity = '0.5';
-            btn.style.cursor = 'not-allowed';
-            
+            if (isRefreshing) return;
             sendMessage('refreshAccounts');
-            
-            // Visual countdown (30 seconds matching backend cooldown)
-            let remaining = 30;
-            btn.innerText = remaining + 's';
-            const interval = setInterval(() => {
-              remaining--;
-              if (remaining <= 0) {
-                clearInterval(interval);
-                btn.innerText = '🔄';
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.style.cursor = 'pointer';
-                refreshCooldown = false;
-              } else {
-                btn.innerText = remaining + 's';
-              }
-            }, 1000);
+          }
+
+          // ── Cancel confirmation ──
+          function showCancelConfirm() {
+            document.getElementById('cancelConfirmOverlay').style.display = 'flex';
+          }
+          function dismissCancelConfirm() {
+            document.getElementById('cancelConfirmOverlay').style.display = 'none';
+          }
+          function confirmCancel() {
+            document.getElementById('cancelConfirmOverlay').style.display = 'none';
+            sendMessage('cancelRefresh');
           }
 
           let state = vscode.getState() || { activeModels: {} };
@@ -1805,14 +1933,63 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             vscode.postMessage({ command, email, modelKey });
           }
 
-          // ── Loading Overlay messages ──
+          // ── Progressive refresh messages ──
+          function setActionsDisabled(disabled) {
+            const body = document.body;
+            if (disabled) {
+              body.classList.add('actions-disabled');
+            } else {
+              body.classList.remove('actions-disabled');
+            }
+            // Toggle cancel button visibility
+            const cancelBtn = document.getElementById('cancelRefreshBtn');
+            if (cancelBtn) cancelBtn.style.display = disabled ? 'inline-flex' : 'none';
+            // Toggle refresh button visibility (hide when refreshing)
+            const refreshBtn = document.getElementById('refreshBtn');
+            if (refreshBtn) refreshBtn.style.display = disabled ? 'none' : 'inline-flex';
+          }
+
+          function getCardByEmail(email) {
+            return document.querySelector('.account-card[data-email="' + email + '"]');
+          }
+
           window.addEventListener('message', event => {
             const msg = event.data;
-            if (msg.command === 'showLoading') {
+
+            if (msg.command === 'refreshStarted') {
+              isRefreshing = true;
+              setActionsDisabled(true);
+
+            } else if (msg.command === 'accountRefreshStart') {
+              const card = getCardByEmail(msg.email);
+              if (card) {
+                const indicator = card.querySelector('.card-refresh-indicator');
+                if (indicator) indicator.style.display = 'flex';
+              }
+
+            } else if (msg.command === 'accountRefreshDone') {
+              const card = getCardByEmail(msg.email);
+              if (card) {
+                const indicator = card.querySelector('.card-refresh-indicator');
+                if (indicator) indicator.style.display = 'none';
+              }
+              // Note: after all accounts done, the extension triggers a full re-render
+              // which will re-sort and rebuild all cards with updated data.
+
+            } else if (msg.command === 'refreshFinished') {
+              isRefreshing = false;
+              setActionsDisabled(false);
+              // Dismiss cancel dialog if still open (refresh finished naturally)
+              dismissCancelConfirm();
+              // Hide all remaining card indicators (safety)
+              document.querySelectorAll('.card-refresh-indicator').forEach(el => el.style.display = 'none');
+
+            } else if (msg.command === 'showLoading') {
               const overlay = document.getElementById('loadingOverlay');
               const text = document.getElementById('loadingText');
               if (overlay) overlay.style.display = 'flex';
               if (text && msg.text) text.innerText = msg.text;
+
             } else if (msg.command === 'hideLoading') {
               const overlay = document.getElementById('loadingOverlay');
               if (overlay) overlay.style.display = 'none';

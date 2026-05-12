@@ -201,8 +201,23 @@ export class AccountService {
   /**
    * Workflow: Refresh all balances
    * Loops through all stored accounts and updates their credits/status.
+   * 
+   * Supports per-account progress callbacks and cancellation.
+   * @param notify Whether to show toast notification on completion
+   * @param options.onAccountStart Called when an individual account starts refreshing
+   * @param options.onAccountDone  Called when an individual account finishes (success or skip)
+   * @param options.onComplete     Called when all accounts are done
+   * @param options.signal         AbortSignal to cancel the refresh mid-loop
    */
-  async refreshBalancesWorkflow(notify: boolean = true): Promise<void> {
+  async refreshBalancesWorkflow(
+    notify: boolean = true,
+    options?: {
+      onAccountStart?: (email: string) => void;
+      onAccountDone?: (email: string, updatedBalances?: Record<string, any>, updatedStatus?: AccountStatus) => void;
+      onComplete?: () => void;
+      signal?: AbortSignal;
+    }
+  ): Promise<void> {
     // ── Guard: Prevent concurrent or rapid-fire refreshes ──
     if (this._isRefreshing) {
       Logger.getInstance().info('Refresh already in progress, ignoring duplicate request.');
@@ -236,8 +251,20 @@ export class AccountService {
     const config = ExtensionConfig.getInstance();
 
     for (const account of accounts) {
+      // ── Check for cancellation ──
+      if (options?.signal?.aborted) {
+        Logger.getInstance().info('Refresh cancelled by user.');
+        break;
+      }
+
+      // Notify UI: this account is starting
+      options?.onAccountStart?.(account.email);
+
       let tokens = await this.accountRepo.getTokens(account.email);
-      if (!tokens) continue;
+      if (!tokens) {
+        options?.onAccountDone?.(account.email);
+        continue;
+      }
 
       const now = Math.floor(Date.now() / 1000);
       
@@ -251,8 +278,15 @@ export class AccountService {
          } catch(e) {
            Logger.getInstance().warn(`Skipping balance fetch for ${account.email} due to expired token.`);
            await this.accountRepo.updateAccount(account.email, { status: AccountStatus.TOKEN_EXPIRED });
+           options?.onAccountDone?.(account.email, undefined, AccountStatus.TOKEN_EXPIRED);
            continue; 
          }
+      }
+
+      // Check cancellation again before API call
+      if (options?.signal?.aborted) {
+        Logger.getInstance().info('Refresh cancelled by user before API call.');
+        break;
       }
 
       // Fetch Balance
@@ -278,15 +312,29 @@ export class AccountService {
         status: status,
         lastRefreshedAt: new Date().toISOString()
       });
+
+      // Notify UI: this account is done with updated data
+      options?.onAccountDone?.(account.email, balanceInfo.balances, status);
     }
 
-    if (notify && successCount > 0) {
+    const wasCancelled = !!options?.signal?.aborted;
+
+    if (wasCancelled) {
+      // Don't show "all refreshed" — show cancellation notice instead
+      if (notify) {
+        const i18n = I18nService.getInstance();
+        vscode.window.showInformationMessage(i18n.t('accounts.refreshCancelled'));
+      }
+    } else if (notify && successCount > 0) {
       const i18n = I18nService.getInstance();
       vscode.window.showInformationMessage(i18n.t('notifications.refreshComplete'));
     }
     
     // Update global refresh timestamp
     await this.accountRepo.setBalancesLastRefreshed(Date.now());
+    
+    // Notify UI: all done
+    options?.onComplete?.();
     
     this._onAccountsChanged.fire();
     } finally {
