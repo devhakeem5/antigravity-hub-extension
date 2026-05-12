@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Encrypted Backups**: Backup files are now password-encrypted. Legacy unencrypted imports still supported.
 - **Auto-Refresh Settings**: Configurable automatic balance refresh with enable/disable toggle and customizable interval (default: 15 minutes). Available in both VS Code settings and the in-panel settings modal.
 - **Active-Only Refresh**: When auto-refresh is disabled, only the active account's balance is updated on panel open (if stale for 5+ minutes).
+- **Editor Compatibility Check**: The extension now detects whether it's running inside Antigravity. Non-Antigravity editors display a dedicated screen with a download link instead of the full panel.
 
 ### Fixed
 - **Active Account Detection**: Active account now correctly detected on launch regardless of how it was activated.

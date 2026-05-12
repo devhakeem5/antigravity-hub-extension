@@ -189,7 +189,10 @@
     "autoRefreshDescription": "عند التفعيل، يتم تحديث الأرصدة تلقائياً عند فتح اللوحة.",
     "refreshIntervalLabel": "فترة التحديث (دقائق)",
     "refreshIntervalDescription": "يتم تحديث الأرصدة إذا مر أكثر من هذا العدد من الدقائق منذ آخر تحديث.",
-    "activeAccountOnlyNote": "عند تعطيل التحديث التلقائي، يتم تحديث رصيد الحساب النشط فقط (كل 5 دقائق)."
+    "activeAccountOnlyNote": "عند تعطيل التحديث التلقائي، يتم تحديث رصيد الحساب النشط فقط (كل 5 دقائق).",
+    "notAntigravityTitle": "يتطلب محرر Antigravity",
+    "notAntigravityMessage": "هذه الإضافة مصممة للعمل حصرياً مع محرر الأكواد Antigravity. لا يمكنها العمل مع محررات أخرى.",
+    "downloadAntigravity": "تنزيل Antigravity"
   },
   "service": {
     "generatingDeviceProfile": "جاري إنشاء بصمة الجهاز...",

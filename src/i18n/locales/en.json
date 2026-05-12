@@ -189,7 +189,10 @@
     "autoRefreshDescription": "When enabled, balances are refreshed automatically when you open the panel.",
     "refreshIntervalLabel": "Refresh Interval (minutes)",
     "refreshIntervalDescription": "Balances will refresh if more than this many minutes have passed since the last update.",
-    "activeAccountOnlyNote": "When auto-refresh is disabled, only the active account balance is updated (every 5 min)."
+    "activeAccountOnlyNote": "When auto-refresh is disabled, only the active account balance is updated (every 5 min).",
+    "notAntigravityTitle": "Antigravity Required",
+    "notAntigravityMessage": "This extension is designed to work exclusively with the Antigravity code editor. It cannot function with other editors.",
+    "downloadAntigravity": "Download Antigravity"
   },
   "service": {
     "generatingDeviceProfile": "Generating device profile...",

@@ -166,6 +166,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       }
     });
 
+    // Skip all account operations if not running in Antigravity editor
+    if (!this.isAntigravityEditor()) {
+      this.refresh();
+      return;
+    }
+
     // Step 1: Detect and pin the active Antigravity account (independent of balance refresh)
     // Step 2: Render the UI with the pinned account at the top
     // Step 3: Conditionally trigger balance refresh based on settings
@@ -189,6 +195,13 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         await this.handleActiveAccountRefresh();
       }
     });
+  }
+
+  /**
+   * Checks if the current editor is Antigravity (or a variant thereof).
+   */
+  private isAntigravityEditor(): boolean {
+    return vscode.env.appName.toLowerCase().includes('antigravity');
   }
 
   /**
@@ -656,6 +669,52 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
   private async _getHtmlForWebview(webview: vscode.Webview): Promise<string> {
     const i18n = I18nService.getInstance();
     const isRtl = i18n.getLocale() === 'ar';
+
+    // ── Not-Antigravity screen ──
+    if (!this.isAntigravityEditor()) {
+      const logoUri = webview.asWebviewUri(
+        vscode.Uri.joinPath(this.extensionUri, 'resources', 'only_logo.png')
+      );
+      return `<!DOCTYPE html>
+      <html lang="${isRtl ? 'ar' : 'en'}" dir="${isRtl ? 'rtl' : 'ltr'}">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+          body {
+            margin: 0; padding: 24px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            min-height: 80vh;
+            font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+            color: var(--vscode-foreground);
+            background: transparent;
+            text-align: center;
+          }
+          .logo { width: 72px; height: 72px; margin-bottom: 20px; opacity: 0.85; }
+          .title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; }
+          .message { font-size: 0.88rem; opacity: 0.7; line-height: 1.5; margin-bottom: 24px; max-width: 280px; }
+          .download-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 10px 20px; border: none; border-radius: 6px;
+            background: var(--vscode-button-background, #4f46e5);
+            color: var(--vscode-button-foreground, #fff);
+            font-size: 0.9rem; font-weight: 500; cursor: pointer;
+            text-decoration: none; transition: opacity 0.2s;
+          }
+          .download-btn:hover { opacity: 0.85; }
+        </style>
+      </head>
+      <body>
+        <img src="${logoUri}" class="logo" alt="Antigravity">
+        <div class="title">${i18n.t('webview.notAntigravityTitle')}</div>
+        <div class="message">${i18n.t('webview.notAntigravityMessage')}</div>
+        <a class="download-btn" href="https://antigravity.google/">
+          ${i18n.t('webview.downloadAntigravity')}
+        </a>
+      </body>
+      </html>`;
+    }
+
     const configLanguage = vscode.workspace.getConfiguration('antigravityHub').get<string>('language', 'auto');
     const configAutoRefresh = vscode.workspace.getConfiguration('antigravityHub').get<boolean>('autoRefreshEnabled', true);
     const configRefreshInterval = vscode.workspace.getConfiguration('antigravityHub').get<number>('refreshIntervalMinutes', 15);
