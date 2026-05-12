@@ -153,6 +153,10 @@
       "label": "فترة التحديث",
       "description": "كم مرة يتم تحديث بيانات الرصيد (بالدقائق)"
     },
+    "autoRefresh": {
+      "label": "التحديث التلقائي",
+      "description": "تحديث الأرصدة تلقائياً عند فتح اللوحة"
+    },
     "lowCreditThreshold": {
       "label": "حد الرصيد المنخفض",
       "description": "التنبيه عندما ينخفض الرصيد عن هذا المبلغ"
@@ -180,7 +184,12 @@
     "loginRequired": "سجل الدخول لحساب لتمكين هذا الخيار",
     "activating": "جاري التنشيط...",
     "language": "اللغة",
-    "languageAuto": "تلقائي (حسب النظام)"
+    "languageAuto": "تلقائي (حسب النظام)",
+    "autoRefreshLabel": "التحديث التلقائي للأرصدة",
+    "autoRefreshDescription": "عند التفعيل، يتم تحديث الأرصدة تلقائياً عند فتح اللوحة.",
+    "refreshIntervalLabel": "فترة التحديث (دقائق)",
+    "refreshIntervalDescription": "يتم تحديث الأرصدة إذا مر أكثر من هذا العدد من الدقائق منذ آخر تحديث.",
+    "activeAccountOnlyNote": "عند تعطيل التحديث التلقائي، يتم تحديث رصيد الحساب النشط فقط (كل 5 دقائق)."
   },
   "service": {
     "generatingDeviceProfile": "جاري إنشاء بصمة الجهاز...",

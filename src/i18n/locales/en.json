@@ -153,6 +153,10 @@
       "label": "Refresh Interval",
       "description": "How often to refresh balance data (in minutes)"
     },
+    "autoRefresh": {
+      "label": "Auto-Refresh",
+      "description": "Automatically refresh balances when opening the panel"
+    },
     "lowCreditThreshold": {
       "label": "Low Credit Threshold",
       "description": "Warn when credits drop below this amount"
@@ -180,7 +184,12 @@
     "loginRequired": "Sign in to an account to enable this option",
     "activating": "Activating...",
     "language": "Language",
-    "languageAuto": "Auto (System Default)"
+    "languageAuto": "Auto (System Default)",
+    "autoRefreshLabel": "Auto-Refresh Balances",
+    "autoRefreshDescription": "When enabled, balances are refreshed automatically when you open the panel.",
+    "refreshIntervalLabel": "Refresh Interval (minutes)",
+    "refreshIntervalDescription": "Balances will refresh if more than this many minutes have passed since the last update.",
+    "activeAccountOnlyNote": "When auto-refresh is disabled, only the active account balance is updated (every 5 min)."
   },
   "service": {
     "generatingDeviceProfile": "Generating device profile...",

@@ -16,6 +16,7 @@ import { Logger } from '../../core/utils/logger';
 import { Account, AccountTokens, AccountStatus } from '../../core/domain/models/account.model';
 import { DeviceProfile } from '../../core/domain/models/device-profile.model';
 import { CryptoUtils } from '../../core/utils/crypto.utils';
+import { ExtensionConfig } from '../../core/config/extension.config';
 
 /** Shape of an individual account inside the backup */
 interface ExportedAccount {
@@ -141,6 +142,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           if (message.preferredModel !== undefined) {
             await this.accountRepo.setPreferredModel(message.preferredModel);
           }
+          if (message.autoRefreshEnabled !== undefined) {
+            await vscode.workspace.getConfiguration('antigravityHub').update('autoRefreshEnabled', message.autoRefreshEnabled, vscode.ConfigurationTarget.Global);
+          }
+          if (message.refreshIntervalMinutes !== undefined) {
+            await vscode.workspace.getConfiguration('antigravityHub').update('refreshIntervalMinutes', message.refreshIntervalMinutes, vscode.ConfigurationTarget.Global);
+          }
           if (message.language !== undefined) {
             const currentLang = vscode.workspace.getConfiguration('antigravityHub').get<string>('language');
             if (currentLang !== message.language) {
@@ -161,18 +168,25 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
     // Step 1: Detect and pin the active Antigravity account (independent of balance refresh)
     // Step 2: Render the UI with the pinned account at the top
-    // Step 3: Conditionally trigger balance refresh based on cooldown
+    // Step 3: Conditionally trigger balance refresh based on settings
     this.detectAndPinActiveAccount().then(() => this.refresh()).then(async () => {
-      // Auto-refresh balances if they are older than 5 minutes
       const accounts = await this.accountRepo.getAllAccounts();
-      if (accounts.length > 0) {
+      if (accounts.length === 0) return;
+
+      const config = ExtensionConfig.getInstance();
+
+      if (config.isAutoRefreshEnabled()) {
+        // Auto-refresh ENABLED: check global interval (user-configured, default 15 min)
         const lastRefreshed = await this.accountRepo.getBalancesLastRefreshed();
         const now = Date.now();
-        const fiveMinutesMs = 5 * 60 * 1000;
-        
-        if (now - lastRefreshed > fiveMinutesMs) {
+        const intervalMs = config.getRefreshIntervalMinutes() * 60 * 1000;
+
+        if (now - lastRefreshed > intervalMs) {
           await this.handleProgressiveRefresh(true);
         }
+      } else {
+        // Auto-refresh DISABLED: only refresh the active account if 5 min passed
+        await this.handleActiveAccountRefresh();
       }
     });
   }
@@ -283,6 +297,43 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       // Always tell webview to re-enable UI (even on cancel/error)
       this._view?.webview.postMessage({ command: 'refreshFinished' });
     }
+  }
+
+  // ─── Active Account Refresh (Auto-refresh Disabled) ─────────────────────
+
+  /**
+   * Refreshes only the active (pinned) account's balance.
+   * Used when auto-refresh is disabled — provides a lightweight update
+   * for just the account currently in use by Antigravity.
+   * Only runs if more than 5 minutes have passed since that account's last refresh.
+   */
+  private async handleActiveAccountRefresh(): Promise<void> {
+    if (!this._pinnedActiveEmail) return;
+
+    // Find the actual email (preserving original case) from the account list
+    const accounts = await this.accountRepo.getAllAccounts();
+    const activeAccount = accounts.find(a => a.email.toLowerCase() === this._pinnedActiveEmail);
+    if (!activeAccount) return;
+
+    // Check if 5 minutes have passed since this account's last refresh
+    const fiveMinMs = 5 * 60 * 1000;
+    if (activeAccount.lastRefreshedAt) {
+      const lastRefreshed = new Date(activeAccount.lastRefreshedAt).getTime();
+      if (Date.now() - lastRefreshed <= fiveMinMs) return;
+    }
+
+    // Refresh this single account with card loading indicator
+    await this.accountService.refreshSingleAccountBalance(activeAccount.email, {
+      onStart: (email: string) => {
+        this._view?.webview.postMessage({ command: 'accountRefreshStart', email });
+      },
+      onDone: (email: string, updatedBalances?: Record<string, any>, updatedStatus?: string) => {
+        this._view?.webview.postMessage({ command: 'accountRefreshDone', email, balances: updatedBalances, status: updatedStatus });
+      }
+    });
+
+    // Re-render to apply updated data and sorting
+    await this.refresh();
   }
 
   /**
@@ -606,6 +657,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const i18n = I18nService.getInstance();
     const isRtl = i18n.getLocale() === 'ar';
     const configLanguage = vscode.workspace.getConfiguration('antigravityHub').get<string>('language', 'auto');
+    const configAutoRefresh = vscode.workspace.getConfiguration('antigravityHub').get<boolean>('autoRefreshEnabled', true);
+    const configRefreshInterval = vscode.workspace.getConfiguration('antigravityHub').get<number>('refreshIntervalMinutes', 15);
     const accounts = await this.accountRepo.getAccountSummaries();
 
     // ── Use the cached pinned active account (set by detectAndPinActiveAccount) ──
@@ -1790,7 +1843,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
         <!-- Settings Modal -->
         <div id="settingsModal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
-          <div class="modal-content" style="background:var(--vscode-editor-background); border:1px solid var(--vscode-widget-border); border-radius:8px; width:90%; max-width:400px; padding:20px; box-shadow:0 4px 12px rgba(0,0,0,0.2);">
+          <div class="modal-content" style="background:var(--vscode-editor-background); border:1px solid var(--vscode-widget-border); border-radius:8px; width:90%; max-width:400px; padding:20px; box-shadow:0 4px 12px rgba(0,0,0,0.2); max-height:90vh; overflow-y:auto;">
             <h3 style="margin-top:0; margin-bottom:16px;">${i18n.t('accounts.settings')}</h3>
             
             <div style="margin-bottom: 16px;">
@@ -1802,7 +1855,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               </select>
             </div>
 
-            <div style="margin-bottom: 20px;">
+            <div style="margin-bottom: 16px;">
               <label for="preferredModelSelect" style="display:block; margin-bottom:8px; font-weight:bold;">${i18n.t('webview.preferredModelSort')}</label>
               <select id="preferredModelSelect" style="width:100%; padding:8px; background:var(--vscode-dropdown-background); color:var(--vscode-dropdown-foreground); border:1px solid var(--vscode-dropdown-border); border-radius:4px;">
                 <option value="">${i18n.t('webview.noSelectionDefault')}</option>
@@ -1811,6 +1864,26 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               <p style="font-size:0.85em; opacity:0.7; margin-top:8px;" id="settingsHelpText">
                 ${i18n.t('webview.sortExplanation')}
               </p>
+            </div>
+
+            <div style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-bottom: 16px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                <label for="autoRefreshToggle" style="font-weight:bold; cursor:pointer;">${i18n.t('webview.autoRefreshLabel')}</label>
+                <label style="position:relative; display:inline-block; width:40px; height:22px; cursor:pointer;">
+                  <input type="checkbox" id="autoRefreshToggle" ${configAutoRefresh ? 'checked' : ''} onchange="onAutoRefreshToggle()" style="opacity:0; width:0; height:0;">
+                  <span style="position:absolute; inset:0; background:var(--glass-border); border-radius:11px; transition:0.3s;"></span>
+                  <span id="autoRefreshSlider" style="position:absolute; top:2px; ${isRtl ? 'right' : 'left'}:2px; width:18px; height:18px; background:var(--text-primary); border-radius:50%; transition:0.3s; ${configAutoRefresh ? (isRtl ? 'right:20px' : 'left:20px') : ''}"></span>
+                </label>
+              </div>
+              <p style="font-size:0.82em; opacity:0.65; margin:0 0 12px 0;">${i18n.t('webview.autoRefreshDescription')}</p>
+
+              <div id="refreshIntervalGroup" style="${configAutoRefresh ? '' : 'opacity:0.4; pointer-events:none;'}">
+                <label for="refreshIntervalInput" style="display:block; margin-bottom:6px; font-weight:bold; font-size:0.9em;">${i18n.t('webview.refreshIntervalLabel')}</label>
+                <input type="number" id="refreshIntervalInput" value="${configRefreshInterval}" min="1" max="120" style="width:100%; padding:8px; background:var(--vscode-input-background, var(--surface-light)); color:var(--vscode-input-foreground, var(--text-primary)); border:1px solid var(--vscode-input-border, var(--border-color)); border-radius:4px;">
+                <p style="font-size:0.82em; opacity:0.65; margin:6px 0 0 0;">${i18n.t('webview.refreshIntervalDescription')}</p>
+              </div>
+
+              <p id="activeOnlyNote" style="font-size:0.82em; color:var(--warning-color); margin:10px 0 0 0; ${configAutoRefresh ? 'display:none;' : ''}">${i18n.t('webview.activeAccountOnlyNote')}</p>
             </div>
 
             <div style="display:flex; justify-content:flex-end; gap:8px;">
@@ -1824,6 +1897,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           const availableModelKeys = ${JSON.stringify(availableModelKeys)};
           const currentPreferredModel = ${JSON.stringify(effectivePreferred)};
           const hasAccounts = ${accounts.length > 0};
+          const currentAutoRefresh = ${configAutoRefresh};
+          const currentRefreshInterval = ${configRefreshInterval};
+          const isRtlDir = ${isRtl};
           
           const vscode = acquireVsCodeApi();
 
@@ -1987,12 +2063,30 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
 
           // ── Settings Modal ──
+          function onAutoRefreshToggle() {
+            const toggle = document.getElementById('autoRefreshToggle');
+            const intervalGroup = document.getElementById('refreshIntervalGroup');
+            const activeNote = document.getElementById('activeOnlyNote');
+            const slider = document.getElementById('autoRefreshSlider');
+            if (toggle.checked) {
+              intervalGroup.style.opacity = '1';
+              intervalGroup.style.pointerEvents = 'auto';
+              activeNote.style.display = 'none';
+              slider.style[isRtlDir ? 'right' : 'left'] = '20px';
+            } else {
+              intervalGroup.style.opacity = '0.4';
+              intervalGroup.style.pointerEvents = 'none';
+              activeNote.style.display = 'block';
+              slider.style[isRtlDir ? 'right' : 'left'] = '2px';
+            }
+          }
+
           function openSettings() {
             const modal = document.getElementById('settingsModal');
             const select = document.getElementById('preferredModelSelect');
             const helpText = document.getElementById('settingsHelpText');
             
-            // Populate options
+            // Populate preferred model options
             select.innerHTML = '<option value="">${i18n.t('webview.noSelectionDefault')}</option>';
             
             if (!hasAccounts || availableModelKeys.length === 0) {
@@ -2027,8 +2121,18 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             const selectedModel = select.value;
             const langSelect = document.getElementById('languageSelect');
             const selectedLang = langSelect ? langSelect.value : 'auto';
+            const autoRefreshToggle = document.getElementById('autoRefreshToggle');
+            const autoRefreshEnabled = autoRefreshToggle ? autoRefreshToggle.checked : true;
+            const intervalInput = document.getElementById('refreshIntervalInput');
+            const refreshInterval = intervalInput ? Math.max(1, Math.min(120, parseInt(intervalInput.value) || 15)) : 15;
             
-            vscode.postMessage({ command: 'saveSettings', language: selectedLang, preferredModel: selectedModel });
+            vscode.postMessage({
+              command: 'saveSettings',
+              language: selectedLang,
+              preferredModel: selectedModel,
+              autoRefreshEnabled: autoRefreshEnabled,
+              refreshIntervalMinutes: refreshInterval
+            });
             closeSettings();
             // Show loading overlay briefly since the webview will be re-rendered
             vscode.postMessage({ command: 'showLoading' });

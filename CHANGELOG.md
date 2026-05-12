@@ -5,14 +5,18 @@ All notable changes to the "Antigravity Hub" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.3] - 2026-05-11
+## [0.1.3] - 2026-05-12
 
 ### Added
 - **Session Re-authentication**: "Re-sign in" button for expired sessions — no need to remove and re-add accounts.
 - **Encrypted Backups**: Backup files are now password-encrypted. Legacy unencrypted imports still supported.
+- **Auto-Refresh Settings**: Configurable automatic balance refresh with enable/disable toggle and customizable interval (default: 15 minutes). Available in both VS Code settings and the in-panel settings modal.
+- **Active-Only Refresh**: When auto-refresh is disabled, only the active account's balance is updated on panel open (if stale for 5+ minutes).
 
 ### Fixed
 - **Active Account Detection**: Active account now correctly detected on launch regardless of how it was activated.
+- **Cancel Dialog**: Cancel confirmation dialog buttons are no longer disabled during refresh — they now respond to clicks as expected.
+- **Cancel Flow**: Confirming cancellation now shows a "Cancelling..." loading state while waiting for the current account to finish, then applies sorting and shows a completion toast.
 
 ### Changed
 - **Inline Balance Refresh**: Per-account loading indicator replaces the full-screen overlay. Buttons are disabled during refresh with a cancellable confirmation dialog.

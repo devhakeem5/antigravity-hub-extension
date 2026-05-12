@@ -129,12 +129,17 @@
           ],
           "description": "Display language for the extension UI"
         },
+        "antigravityHub.autoRefreshEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic balance refresh when opening the extension panel"
+        },
         "antigravityHub.refreshIntervalMinutes": {
           "type": "number",
-          "default": 0,
-          "minimum": 0,
+          "default": 15,
+          "minimum": 1,
           "maximum": 120,
-          "description": "Interval in minutes for automatic balance refresh (0 = disabled)"
+          "description": "Interval in minutes for automatic balance refresh"
         },
         "antigravityHub.lowCreditThreshold": {
           "type": "number",

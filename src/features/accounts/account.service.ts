@@ -357,6 +357,75 @@ export class AccountService {
   }
 
   /**
+   * Refreshes the balance for a single account.
+   * Used when auto-refresh is disabled — only the active account gets updated.
+   * Follows the same per-account logic as refreshBalancesWorkflow.
+   */
+  async refreshSingleAccountBalance(
+    email: string,
+    callbacks?: {
+      onStart?: (email: string) => void;
+      onDone?: (email: string, balances?: Record<string, any>, status?: AccountStatus) => void;
+    }
+  ): Promise<void> {
+    const account = await this.accountRepo.getAccount(email);
+    if (!account) return;
+
+    callbacks?.onStart?.(email);
+
+    let tokens = await this.accountRepo.getTokens(email);
+    if (!tokens) {
+      callbacks?.onDone?.(email);
+      return;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+
+    // Auto-refresh token if needed before API call
+    if (tokens.expiresAt < (now + 300)) {
+      try {
+        const newTokens = await this.authService.refreshAccessToken(tokens.refreshToken);
+        tokens.accessToken = newTokens.accessToken;
+        tokens.expiresAt = now + newTokens.expiresIn;
+        await this.accountRepo.storeTokens(email, tokens);
+      } catch (e) {
+        Logger.getInstance().warn(`Skipping balance fetch for ${email}: expired token.`);
+        await this.accountRepo.updateAccount(email, { status: AccountStatus.TOKEN_EXPIRED });
+        callbacks?.onDone?.(email, undefined, AccountStatus.TOKEN_EXPIRED);
+        return;
+      }
+    }
+
+    const config = ExtensionConfig.getInstance();
+    const balanceInfo = await this.balanceService.getBalanceInfo(tokens.accessToken);
+
+    let status = balanceInfo.hasError ? AccountStatus.ERROR : AccountStatus.ACTIVE;
+
+    if (!balanceInfo.hasError) {
+      const values = Object.values(balanceInfo.balances);
+      const totalCredits = values.reduce((sum: number, val: any) => sum + (typeof val === 'number' ? val : (val?.value || 0)), 0);
+
+      if (values.length > 0 && totalCredits <= 0) {
+        status = AccountStatus.DEPLETED;
+      } else if (totalCredits <= config.getLowCreditThreshold()) {
+        status = AccountStatus.LOW_BALANCE;
+      }
+    }
+
+    await this.accountRepo.updateAccount(email, {
+      balances: balanceInfo.balances,
+      plan: balanceInfo.plan,
+      status: status,
+      lastRefreshedAt: new Date().toISOString()
+    });
+
+    callbacks?.onDone?.(email, balanceInfo.balances, status);
+
+    // Update global refresh timestamp
+    await this.accountRepo.setBalancesLastRefreshed(Date.now());
+  }
+
+  /**
    * Workflow: Re-authenticate an account with an expired token
    * Runs the OAuth flow again for the SAME email, verifies identity,
    * and updates stored tokens without losing any account data (alias, device profile, etc.).
