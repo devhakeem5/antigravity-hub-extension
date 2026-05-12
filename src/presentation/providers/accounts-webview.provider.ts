@@ -52,14 +52,21 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'antigravity-hub.accountsView';
   private _view?: vscode.WebviewView;
 
+  /**
+   * Cached email of the account pinned by detectAndPinActiveAccount().
+   * null = no account is pinned (either list is empty, logged out, or email not in list).
+   * Once set, the post-refresh re-sort will respect this pin and not re-order this account.
+   */
+  private _pinnedActiveEmail: string | null = null;
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly accountRepo: IAccountRepository,
     private readonly accountService: AccountService
   ) {
-    // Automatically re-render the UI when underlying account data changes
+    // Automatically re-detect active account and re-render when data changes
     this.accountService.onAccountsChanged(() => {
-      this.refresh();
+      this.detectAndPinActiveAccount().then(() => this.refresh());
     });
   }
 
@@ -152,8 +159,10 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    // Trigger an initial refresh
-    this.refresh().then(async () => {
+    // Step 1: Detect and pin the active Antigravity account (independent of balance refresh)
+    // Step 2: Render the UI with the pinned account at the top
+    // Step 3: Conditionally trigger balance refresh based on cooldown
+    this.detectAndPinActiveAccount().then(() => this.refresh()).then(async () => {
       // Auto-refresh balances if they are older than 5 minutes
       const accounts = await this.accountRepo.getAllAccounts();
       if (accounts.length > 0) {
@@ -162,7 +171,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         const fiveMinutesMs = 5 * 60 * 1000;
         
         if (now - lastRefreshed > fiveMinutesMs) {
-          await this.handleProgressiveRefresh(false);
+          await this.handleProgressiveRefresh(true);
         }
       }
     });
@@ -177,6 +186,57 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  // ─── Active Account Detection (Independent Process) ───────────────────────
+
+  /**
+   * Independent process: Detects the currently active Antigravity account
+   * and pins it to the top of the account list.
+   * 
+   * This is NOT part of the balance refresh flow. It runs:
+   *   - When the UI opens (before balance refresh consideration)
+   *   - Before any manual balance refresh
+   *   - When the user clicks the manual refresh button
+   * 
+   * Flow:
+   *   1. Check if the tool's account list is empty → stop
+   *   2. Read the logged-in email from Antigravity's state.vscdb
+   *   3. If no email (logged out) → clear pin, stop
+   *   4. If email exists, check if it's in the tool's account list
+   *   5. If found → pin it (store in _pinnedActiveEmail)
+   *   6. If not found → clear pin
+   */
+  private async detectAndPinActiveAccount(): Promise<void> {
+    // Step 1: Check if the account list is empty
+    const accounts = await this.accountRepo.getAllAccounts();
+    if (accounts.length === 0) {
+      this._pinnedActiveEmail = null;
+      return;
+    }
+
+    // Step 2: Get the currently logged-in Antigravity account
+    const activeEmail = await this.accountService.getActiveAntigravityEmail();
+
+    // Step 3: If no account (Antigravity is logged out) → clear pin and stop
+    if (!activeEmail) {
+      this._pinnedActiveEmail = null;
+      return;
+    }
+
+    // Step 4: Check if the email is in the tool's account list
+    const activeEmailLower = activeEmail.toLowerCase();
+    const matchFound = accounts.some(a => a.email.toLowerCase() === activeEmailLower);
+
+    if (matchFound) {
+      // Step 5: Pin this account — it will be moved to the top of the list
+      this._pinnedActiveEmail = activeEmailLower;
+      Logger.getInstance().info(`Pinned active account: ${activeEmail}`);
+    } else {
+      // Step 6: Email not in our list — clear pin
+      this._pinnedActiveEmail = null;
+      Logger.getInstance().info(`Active Antigravity email "${activeEmail}" does not match any stored account.`);
+    }
+  }
+
   // ─── Progressive Refresh Handler ──────────────────────────────────────────
 
   /**
@@ -186,9 +246,14 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
    * a full-screen overlay.
    */
   private async handleProgressiveRefresh(notify: boolean = true): Promise<void> {
-    // Step 0: Re-detect active account from Antigravity's state.vscdb
-    // and re-render the UI so active badge & card order are correct before refresh
+    // Step 0: Detect and pin active account BEFORE starting the balance refresh.
+    // This is an independent verification — it always runs regardless of cooldowns.
+    await this.detectAndPinActiveAccount();
     await this.refresh();
+
+    // Step 1: Compute the display order so the refresh iterates accounts in
+    // the same top-to-bottom sequence visible in the UI.
+    const orderedEmails = await this.getDisplayOrderEmails();
 
     // Create abort controller for this refresh cycle
     this._refreshAbortController = new AbortController();
@@ -200,6 +265,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     try {
       await this.accountService.refreshBalancesWorkflow(notify, {
         signal,
+        orderedEmails,
         onAccountStart: (email: string) => {
           this._view?.webview.postMessage({ command: 'accountRefreshStart', email });
         },
@@ -207,7 +273,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           this._view?.webview.postMessage({ command: 'accountRefreshDone', email, balances: updatedBalances, status: updatedStatus });
         },
         onComplete: () => {
-          // Full re-render to apply re-sorting after all accounts are done
+          // Re-render to apply re-sorting after all accounts are done.
+          // The _pinnedActiveEmail is preserved, so the pinned account stays on top.
           this.refresh();
         }
       });
@@ -216,6 +283,37 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       // Always tell webview to re-enable UI (even on cancel/error)
       this._view?.webview.postMessage({ command: 'refreshFinished' });
     }
+  }
+
+  /**
+   * Computes the display order of accounts (same sort used in _getHtmlForWebview).
+   * Returns an array of emails in the order they appear in the UI.
+   */
+  private async getDisplayOrderEmails(): Promise<string[]> {
+    const accounts = await this.accountRepo.getAccountSummaries();
+    const pinnedEmailLower = this._pinnedActiveEmail;
+
+    // Mark active account
+    accounts.forEach(acc => {
+      acc.isActive = (pinnedEmailLower !== null && acc.email.toLowerCase() === pinnedEmailLower);
+    });
+
+    // Apply the same sort: active first, then by preferred model balance
+    const preferredModel = await this.accountRepo.getPreferredModel();
+    const effectivePreferred = preferredModel || '';
+
+    accounts.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      if (effectivePreferred) {
+        const aVal = this.getModelBalanceValue(a.balances, effectivePreferred);
+        const bVal = this.getModelBalanceValue(b.balances, effectivePreferred);
+        return bVal - aVal;
+      }
+      return 0;
+    });
+
+    return accounts.map(a => a.email);
   }
 
   // ─── Export Handler ──────────────────────────────────────────────────────
@@ -510,21 +608,16 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const configLanguage = vscode.workspace.getConfiguration('antigravityHub').get<string>('language', 'auto');
     const accounts = await this.accountRepo.getAccountSummaries();
 
-    // ── Dynamically determine Active Account from Antigravity DB ──
-    // Always read the real active account from Antigravity's state.vscdb,
-    // regardless of what the local DB thinks is active.
-    const activeEmail = await this.accountService.getActiveAntigravityEmail();
-    const activeEmailLower = activeEmail?.toLowerCase() ?? null;
+    // ── Use the cached pinned active account (set by detectAndPinActiveAccount) ──
+    // This does NOT re-read from state.vscdb; it uses the result of the last
+    // independent verification process, ensuring the pinned account survives
+    // post-refresh re-sorting.
+    const pinnedEmailLower = this._pinnedActiveEmail;
     
-    // Reset ALL accounts' isActive flag based on the live Antigravity state
+    // Set isActive flag based on the pinned email
     accounts.forEach(acc => {
-      acc.isActive = (activeEmailLower !== null && acc.email.toLowerCase() === activeEmailLower);
+      acc.isActive = (pinnedEmailLower !== null && acc.email.toLowerCase() === pinnedEmailLower);
     });
-    
-    // Debug: log if active email was found but didn't match any stored account
-    if (activeEmail && !accounts.some(a => a.isActive)) {
-      Logger.getInstance().info(`Active Antigravity email "${activeEmail}" does not match any stored account.`);
-    }
 
     // ── Preferred Model Resolution ──
     // Extract available model keys from first account with balances (after filtering)
@@ -1574,6 +1667,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             pointer-events: none;
             cursor: not-allowed;
           }
+          /* Keep cancel confirmation dialog buttons active during refresh */
+          .actions-disabled .cancel-confirm-actions .btn {
+            opacity: 1;
+            pointer-events: auto;
+            cursor: pointer;
+          }
 
           /* Loading overlay for export/import only */
           .loading-overlay {
@@ -1763,7 +1862,14 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             document.getElementById('cancelConfirmOverlay').style.display = 'none';
           }
           function confirmCancel() {
-            document.getElementById('cancelConfirmOverlay').style.display = 'none';
+            // Transform dialog to "cancelling" state with loading spinner
+            const box = document.querySelector('.cancel-confirm-box');
+            if (box) {
+              box.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:8px 0;">' +
+                '<div class="card-spinner" style="width:22px;height:22px;"></div>' +
+                '<span style="font-size:0.85rem;color:var(--text-secondary);">${i18n.t('accounts.cancellingRefresh')}</span>' +
+                '</div>';
+            }
             sendMessage('cancelRefresh');
           }
 

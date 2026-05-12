@@ -208,6 +208,7 @@ export class AccountService {
    * @param options.onAccountDone  Called when an individual account finishes (success or skip)
    * @param options.onComplete     Called when all accounts are done
    * @param options.signal         AbortSignal to cancel the refresh mid-loop
+   * @param options.orderedEmails  If provided, accounts are refreshed in this order (matching UI display order)
    */
   async refreshBalancesWorkflow(
     notify: boolean = true,
@@ -216,6 +217,7 @@ export class AccountService {
       onAccountDone?: (email: string, updatedBalances?: Record<string, any>, updatedStatus?: AccountStatus) => void;
       onComplete?: () => void;
       signal?: AbortSignal;
+      orderedEmails?: string[];
     }
   ): Promise<void> {
     // ── Guard: Prevent concurrent or rapid-fire refreshes ──
@@ -244,8 +246,20 @@ export class AccountService {
     this._lastRefreshTime = now;
 
     try {
-    const accounts = await this.accountRepo.getAllAccounts();
+    let accounts = await this.accountRepo.getAllAccounts();
     if (accounts.length === 0) { this._isRefreshing = false; return; }
+
+    // Reorder accounts to match UI display order if provided
+    if (options?.orderedEmails && options.orderedEmails.length > 0) {
+      const emailOrder = options.orderedEmails.map(e => e.toLowerCase());
+      accounts = [...accounts].sort((a, b) => {
+        const aIdx = emailOrder.indexOf(a.email.toLowerCase());
+        const bIdx = emailOrder.indexOf(b.email.toLowerCase());
+        const aPos = aIdx === -1 ? emailOrder.length : aIdx;
+        const bPos = bIdx === -1 ? emailOrder.length : bIdx;
+        return aPos - bPos;
+      });
+    }
 
     let successCount = 0;
     const config = ExtensionConfig.getInstance();

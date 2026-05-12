@@ -107,6 +107,7 @@
     "updatingAccount": "Updating...",
     "cancelRefresh": "Cancel",
     "refreshCancelled": "Refresh cancelled.",
+    "cancellingRefresh": "Cancelling...",
     "confirmCancelTitle": "Cancel Refresh?",
     "confirmCancelMessage": "Are you sure you want to stop updating balances?",
     "confirmCancelYes": "Yes, Stop",

@@ -107,6 +107,7 @@
     "updatingAccount": "جارٍ التحديث...",
     "cancelRefresh": "إلغاء",
     "refreshCancelled": "تم إلغاء التحديث.",
+    "cancellingRefresh": "جارٍ الإلغاء...",
     "confirmCancelTitle": "إلغاء التحديث؟",
     "confirmCancelMessage": "هل أنت متأكد من إيقاف تحديث الأرصدة؟",
     "confirmCancelYes": "نعم، أوقف",

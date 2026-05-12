@@ -18,7 +18,6 @@ import { StateDbService } from './infrastructure/storage/state-db.service';
 import { AccountService } from './features/accounts/account.service';
 import { StatusBarProvider } from './presentation/providers/status-bar.provider';
 import { AccountsWebviewProvider } from './presentation/providers/accounts-webview.provider';
-// TODO : complete Investigation Account Switching conversation
 
 /**
  * Called when the extension is activated.
