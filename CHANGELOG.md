@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Editor Compatibility Check**: The extension now detects whether it's running inside Antigravity. Non-Antigravity editors display a dedicated screen with a download link instead of the full panel.
 
 ### Fixed
+- **Active Account Display**: Fixed a bug where cancelling a balance refresh caused the active account to temporarily lose its active status and be treated as a normal account.
 - **Active Account Detection**: Active account now correctly detected on launch regardless of how it was activated.
 - **Cancel Dialog**: Cancel confirmation dialog buttons are no longer disabled during refresh — they now respond to clicks as expected.
 - **Cancel Flow**: Confirming cancellation now shows a "Cancelling..." loading state while waiting for the current account to finish, then applies sorting and shows a completion toast.

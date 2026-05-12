@@ -189,12 +189,12 @@ export class AccountService {
    * Get the currently active account email directly from Antigravity's state database.
    * Does NOT rely on the tool's local database.
    */
-  async getActiveAntigravityEmail(): Promise<string | null> {
+  async getActiveAntigravityEmail(): Promise<string | null | undefined> {
     try {
       return await this.stateDbService.readCurrentEmailFromDb();
     } catch (error) {
       Logger.getInstance().error('Failed to read active account from Antigravity', error);
-      return null;
+      return undefined;
     }
   }
 

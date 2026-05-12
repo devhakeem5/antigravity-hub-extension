@@ -34,6 +34,11 @@ export class StatusBarProvider implements vscode.Disposable {
     const activeEmail = await this.accountService.getActiveAntigravityEmail();
     const i18n = I18nService.getInstance();
 
+    if (activeEmail === undefined) {
+      // Database read error, preserve current status bar state
+      return;
+    }
+
     if (!activeEmail) {
       this.statusBarItem.text = `$(account) ${i18n.t('statusBar.noAccount')}`;
       this.statusBarItem.tooltip = i18n.t('statusBar.tooltip');

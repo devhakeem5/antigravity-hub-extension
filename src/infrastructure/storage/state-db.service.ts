@@ -486,7 +486,7 @@ inject().catch((err) => {
       }
     } catch (error: any) {
       Logger.getInstance().error('Failed to read active account from state.vscdb', error);
-      return null;
+      throw error;
     }
   }
 

@@ -243,6 +243,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     // Step 2: Get the currently logged-in Antigravity account
     const activeEmail = await this.accountService.getActiveAntigravityEmail();
 
+    // Step 2.5: If there was an error reading the database, preserve the current pin
+    if (activeEmail === undefined) {
+      Logger.getInstance().info('Failed to read active email, preserving current pin.');
+      return;
+    }
+
     // Step 3: If no account (Antigravity is logged out) → clear pin and stop
     if (!activeEmail) {
       this._pinnedActiveEmail = null;
