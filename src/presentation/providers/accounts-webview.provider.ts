@@ -287,20 +287,23 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     // Step 1: Compute the display order so the refresh iterates accounts in
     // the same top-to-bottom sequence visible in the UI.
     const orderedEmails = await this.getDisplayOrderEmails();
+    const totalAccounts = orderedEmails.length;
+    let currentIndex = 0;
 
     // Create abort controller for this refresh cycle
     this._refreshAbortController = new AbortController();
     const signal = this._refreshAbortController.signal;
 
-    // Tell webview to disable all buttons and show cancel
-    this._view?.webview.postMessage({ command: 'refreshStarted' });
+    // Tell webview to disable all buttons and show progress banner
+    this._view?.webview.postMessage({ command: 'refreshStarted', totalAccounts });
 
     try {
       await this.accountService.refreshBalancesWorkflow(notify, {
         signal,
         orderedEmails,
         onAccountStart: (email: string) => {
-          this._view?.webview.postMessage({ command: 'accountRefreshStart', email });
+          currentIndex++;
+          this._view?.webview.postMessage({ command: 'accountRefreshStart', email, currentIndex, totalAccounts });
         },
         onAccountDone: (email: string, updatedBalances?: Record<string, any>, updatedStatus?: string) => {
           this._view?.webview.postMessage({ command: 'accountRefreshDone', email, balances: updatedBalances, status: updatedStatus });
@@ -314,7 +317,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     } finally {
       this._refreshAbortController = null;
       // Always tell webview to re-enable UI (even on cancel/error)
-      this._view?.webview.postMessage({ command: 'refreshFinished' });
+      const wasCancelled = !!signal.aborted;
+      this._view?.webview.postMessage({ command: 'refreshFinished', wasCancelled });
     }
   }
 
@@ -341,15 +345,21 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       if (Date.now() - lastRefreshed <= fiveMinMs) return;
     }
 
-    // Refresh this single account with card loading indicator
+    // Show progress banner for single account refresh
+    this._view?.webview.postMessage({ command: 'refreshStarted', totalAccounts: 1 });
+
+    // Refresh this single account with progress banner
     await this.accountService.refreshSingleAccountBalance(activeAccount.email, {
       onStart: (email: string) => {
-        this._view?.webview.postMessage({ command: 'accountRefreshStart', email });
+        this._view?.webview.postMessage({ command: 'accountRefreshStart', email, currentIndex: 1, totalAccounts: 1 });
       },
       onDone: (email: string, updatedBalances?: Record<string, any>, updatedStatus?: string) => {
         this._view?.webview.postMessage({ command: 'accountRefreshDone', email, balances: updatedBalances, status: updatedStatus });
       }
     });
+
+    // Tell webview refresh is finished
+    this._view?.webview.postMessage({ command: 'refreshFinished', wasCancelled: false });
 
     // Re-render to apply updated data and sorting
     await this.refresh();
@@ -1099,7 +1109,6 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
       return `
         <div class="account-card ${acc.isActive ? 'active' : ''} ${isExpired ? 'expired' : ''}" data-email="${acc.email}">
-          <div class="card-refresh-indicator" style="display:none;"><div class="card-spinner"></div><span>${i18n.t('accounts.updatingAccount')}</span></div>
           <div class="card-header">
             ${acc.avatarUrl ? `<img class="avatar ${isExpired ? 'avatar-expired' : ''}" src="${acc.avatarUrl}" alt="${acc.displayName}" />` : `<div class="avatar ${isExpired ? 'avatar-expired' : ''}">${acc.displayName.charAt(0).toUpperCase()}</div>`}
             <div class="user-info">
@@ -1698,27 +1707,80 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             .badge { font-size: 0.6rem; padding: 3px 6px; }
           }
 
-          /* ── Per-card refresh indicator ── */
-          .card-refresh-indicator {
-            display: flex;
-            align-items: center;
+          /* ── Top progress banner for refresh ── */
+          .refresh-progress-banner {
+            display: none;
+            flex-direction: column;
             gap: 8px;
-            padding: 6px 10px;
-            margin-bottom: 10px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
             background: var(--glass-bg);
             border: 1px solid var(--focus-border);
-            border-radius: 6px;
-            font-size: 0.78rem;
-            color: var(--primary-light);
-            animation: fadeIn 0.2s ease;
+            border-radius: 10px;
+            animation: fadeIn 0.25s ease;
+            position: relative;
           }
-          .card-spinner {
-            width: 14px; height: 14px;
-            border: 2px solid var(--glass-border);
-            border-top-color: var(--primary-color);
-            border-radius: 50%;
-            animation: spin 0.7s linear infinite;
+          .refresh-progress-banner.visible {
+            display: flex;
+          }
+          .refresh-progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+          }
+          .refresh-progress-email {
+            font-size: 0.82rem;
+            color: var(--primary-light);
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+            flex-shrink: 1;
+          }
+          .refresh-progress-email .refresh-label {
+            color: var(--text-secondary);
+            font-weight: 400;
+          }
+          .refresh-progress-percent {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--primary-light);
             flex-shrink: 0;
+          }
+          .refresh-progress-bar-track {
+            width: 100%;
+            height: 6px;
+            background: rgba(128,128,128,0.2);
+            border-radius: 3px;
+            overflow: hidden;
+          }
+          .refresh-progress-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            background: var(--primary-color);
+            transition: width 0.4s ease;
+            width: 0%;
+          }
+
+          /* Toast notification */
+          .refresh-toast {
+            display: none;
+            padding: 10px 14px;
+            margin-bottom: 16px;
+            background: rgba(115, 201, 145, 0.12);
+            border: 1px solid var(--success-color);
+            border-radius: 10px;
+            font-size: 0.85rem;
+            color: var(--success-color);
+            font-weight: 500;
+            text-align: center;
+            animation: fadeIn 0.25s ease;
+          }
+          .refresh-toast.visible {
+            display: block;
           }
           @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -1891,6 +1953,18 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <div id="accounts-list">
+          <!-- Refresh Progress Banner -->
+          <div id="refreshProgressBanner" class="refresh-progress-banner">
+            <div class="refresh-progress-info">
+              <span class="refresh-progress-email" id="refreshProgressEmail"></span>
+              <span class="refresh-progress-percent" id="refreshProgressPercent">0%</span>
+            </div>
+            <div class="refresh-progress-bar-track">
+              <div class="refresh-progress-bar-fill" id="refreshProgressBar"></div>
+            </div>
+          </div>
+          <!-- Refresh Toast -->
+          <div id="refreshToast" class="refresh-toast"></div>
           ${accountCardsHtml}
         </div>
 
@@ -2024,7 +2098,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             const box = document.querySelector('.cancel-confirm-box');
             if (box) {
               box.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:8px 0;">' +
-                '<div class="card-spinner" style="width:22px;height:22px;"></div>' +
+                '<div style="width:22px;height:22px;border:2px solid var(--glass-border);border-top-color:var(--primary-color);border-radius:50%;animation:spin 0.7s linear infinite;"></div>' +
                 '<span style="font-size:0.85rem;color:var(--text-secondary);">${i18n.t('accounts.cancellingRefresh')}</span>' +
                 '</div>';
             }
@@ -2285,8 +2359,47 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             if (refreshBtn) refreshBtn.style.display = disabled ? 'none' : 'inline-flex';
           }
 
-          function getCardByEmail(email) {
-            return document.querySelector('.account-card[data-email="' + email + '"]');
+          // ── Progress Banner Management ──
+          let refreshToastTimeout = null;
+
+          function showProgressBanner() {
+            // Clear any existing toast
+            const toast = document.getElementById('refreshToast');
+            if (toast) { toast.classList.remove('visible'); }
+            if (refreshToastTimeout) { clearTimeout(refreshToastTimeout); refreshToastTimeout = null; }
+            
+            const banner = document.getElementById('refreshProgressBanner');
+            if (banner) banner.classList.add('visible');
+          }
+
+          function updateProgressBanner(email, currentIndex, totalAccounts) {
+            const emailEl = document.getElementById('refreshProgressEmail');
+            const percentEl = document.getElementById('refreshProgressPercent');
+            const barEl = document.getElementById('refreshProgressBar');
+            
+            const percent = totalAccounts > 0 ? Math.round((currentIndex / totalAccounts) * 100) : 0;
+            
+            if (emailEl) emailEl.innerHTML = '<span class="refresh-label">${i18n.t('accounts.refreshingAccount')}: </span>' + email;
+            if (percentEl) percentEl.textContent = percent + '%';
+            if (barEl) barEl.style.width = percent + '%';
+          }
+
+          function hideProgressBanner(wasCancelled) {
+            const banner = document.getElementById('refreshProgressBanner');
+            if (banner) banner.classList.remove('visible');
+
+            // Show success toast only if not cancelled
+            if (!wasCancelled) {
+              const toast = document.getElementById('refreshToast');
+              if (toast) {
+                toast.textContent = '${i18n.t('accounts.refreshSuccess')}';
+                toast.classList.add('visible');
+                refreshToastTimeout = setTimeout(() => {
+                  toast.classList.remove('visible');
+                  refreshToastTimeout = null;
+                }, 4000);
+              }
+            }
           }
 
           window.addEventListener('message', event => {
@@ -2295,30 +2408,20 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             if (msg.command === 'refreshStarted') {
               isRefreshing = true;
               setActionsDisabled(true);
+              showProgressBanner();
 
             } else if (msg.command === 'accountRefreshStart') {
-              const card = getCardByEmail(msg.email);
-              if (card) {
-                const indicator = card.querySelector('.card-refresh-indicator');
-                if (indicator) indicator.style.display = 'flex';
-              }
+              updateProgressBanner(msg.email, msg.currentIndex, msg.totalAccounts);
 
             } else if (msg.command === 'accountRefreshDone') {
-              const card = getCardByEmail(msg.email);
-              if (card) {
-                const indicator = card.querySelector('.card-refresh-indicator');
-                if (indicator) indicator.style.display = 'none';
-              }
-              // Note: after all accounts done, the extension triggers a full re-render
-              // which will re-sort and rebuild all cards with updated data.
+              // No per-card UI updates needed; progress banner is updated on accountRefreshStart
 
             } else if (msg.command === 'refreshFinished') {
               isRefreshing = false;
               setActionsDisabled(false);
               // Dismiss cancel dialog if still open (refresh finished naturally)
               dismissCancelConfirm();
-              // Hide all remaining card indicators (safety)
-              document.querySelectorAll('.card-refresh-indicator').forEach(el => el.style.display = 'none');
+              hideProgressBanner(!!msg.wasCancelled);
 
             } else if (msg.command === 'showLoading') {
               const overlay = document.getElementById('loadingOverlay');
