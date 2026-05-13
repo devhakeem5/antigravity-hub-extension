@@ -1936,19 +1936,36 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
                 <label for="autoRefreshToggle" style="font-weight:bold; cursor:pointer;">${i18n.t('webview.autoRefreshLabel')}</label>
                 <label style="position:relative; display:inline-block; width:40px; height:22px; cursor:pointer;">
                   <input type="checkbox" id="autoRefreshToggle" ${configAutoRefresh ? 'checked' : ''} onchange="onAutoRefreshToggle()" style="opacity:0; width:0; height:0;">
-                  <span style="position:absolute; inset:0; background:var(--glass-border); border-radius:11px; transition:0.3s;"></span>
+                  <span id="autoRefreshTrack" style="position:absolute; inset:0; background:${configAutoRefresh ? '#4caf50' : 'var(--glass-border)'}; border-radius:11px; transition:background 0.3s, box-shadow 0.3s; ${configAutoRefresh ? 'box-shadow:0 0 6px rgba(76,175,80,0.4);' : ''}"></span>
                   <span id="autoRefreshSlider" style="position:absolute; top:2px; ${isRtl ? 'right' : 'left'}:2px; width:18px; height:18px; background:var(--text-primary); border-radius:50%; transition:0.3s; ${configAutoRefresh ? (isRtl ? 'right:20px' : 'left:20px') : ''}"></span>
                 </label>
               </div>
               <p style="font-size:0.82em; opacity:0.65; margin:0 0 12px 0;">${i18n.t('webview.autoRefreshDescription')}</p>
 
               <div id="refreshIntervalGroup" style="${configAutoRefresh ? '' : 'opacity:0.4; pointer-events:none;'}">
-                <label for="refreshIntervalInput" style="display:block; margin-bottom:6px; font-weight:bold; font-size:0.9em;">${i18n.t('webview.refreshIntervalLabel')}</label>
-                <input type="number" id="refreshIntervalInput" value="${configRefreshInterval}" min="1" max="120" style="width:100%; padding:8px; background:var(--vscode-input-background, var(--surface-light)); color:var(--vscode-input-foreground, var(--text-primary)); border:1px solid var(--vscode-input-border, var(--border-color)); border-radius:4px;">
+                <label for="refreshIntervalSelect" style="display:block; margin-bottom:6px; font-weight:bold; font-size:0.9em;">${i18n.t('webview.refreshIntervalLabel')}</label>
+                <select id="refreshIntervalSelect" style="width:100%; padding:8px; background:var(--vscode-dropdown-background); color:var(--vscode-dropdown-foreground); border:1px solid var(--vscode-dropdown-border); border-radius:4px;">
+                  <option value="0" ${configRefreshInterval === 0 ? 'selected' : ''}>${i18n.t('webview.intervalImmediate')}</option>
+                  <option value="5" ${configRefreshInterval === 5 ? 'selected' : ''}>${i18n.t('webview.interval5Min')}</option>
+                  <option value="15" ${configRefreshInterval === 15 ? 'selected' : ''}>${i18n.t('webview.interval15Min')}</option>
+                  <option value="30" ${configRefreshInterval === 30 ? 'selected' : ''}>${i18n.t('webview.interval30Min')}</option>
+                  <option value="60" ${configRefreshInterval === 60 ? 'selected' : ''}>${i18n.t('webview.interval1Hour')}</option>
+                  <option value="1440" ${configRefreshInterval === 1440 ? 'selected' : ''}>${i18n.t('webview.interval1Day')}</option>
+                </select>
                 <p style="font-size:0.82em; opacity:0.65; margin:6px 0 0 0;">${i18n.t('webview.refreshIntervalDescription')}</p>
               </div>
+            </div>
 
-              <p id="activeOnlyNote" style="font-size:0.82em; color:var(--warning-color); margin:10px 0 0 0; ${configAutoRefresh ? 'display:none;' : ''}">${i18n.t('webview.activeAccountOnlyNote')}</p>
+            <!-- Immediate Mode Confirmation Dialog -->
+            <div id="immediateConfirmOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:2000; align-items:center; justify-content:center;">
+              <div style="background:var(--vscode-editor-background); border:1px solid var(--vscode-widget-border); border-radius:10px; width:85%; max-width:360px; padding:20px; box-shadow:0 8px 24px rgba(0,0,0,0.3); text-align:center;">
+                <h4 style="margin:0 0 12px 0; color:var(--warning-color); font-size:1em;">${i18n.t('webview.immediateConfirmTitle')}</h4>
+                <p style="font-size:0.85em; opacity:0.8; line-height:1.5; margin:0 0 16px 0;">${i18n.t('webview.immediateConfirmMessage')}</p>
+                <div style="display:flex; justify-content:center; gap:10px;">
+                  <button class="btn" style="background:var(--vscode-button-secondaryBackground); color:var(--vscode-button-secondaryForeground);" onclick="cancelImmediateMode()">${i18n.t('webview.immediateConfirmCancel')}</button>
+                  <button class="btn" style="background:var(--warning-color); color:#000; font-weight:600;" onclick="confirmImmediateMode()">${i18n.t('webview.immediateConfirmYes')}</button>
+                </div>
+              </div>
             </div>
 
             <div style="display:flex; justify-content:flex-end; gap:8px;">
@@ -2128,21 +2145,55 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
 
           // ── Settings Modal ──
+          let _previousIntervalValue = String(currentRefreshInterval);
+
           function onAutoRefreshToggle() {
             const toggle = document.getElementById('autoRefreshToggle');
             const intervalGroup = document.getElementById('refreshIntervalGroup');
-            const activeNote = document.getElementById('activeOnlyNote');
             const slider = document.getElementById('autoRefreshSlider');
+            const track = document.getElementById('autoRefreshTrack');
             if (toggle.checked) {
               intervalGroup.style.opacity = '1';
               intervalGroup.style.pointerEvents = 'auto';
-              activeNote.style.display = 'none';
               slider.style[isRtlDir ? 'right' : 'left'] = '20px';
+              track.style.background = '#4caf50';
+              track.style.boxShadow = '0 0 6px rgba(76,175,80,0.4)';
             } else {
               intervalGroup.style.opacity = '0.4';
               intervalGroup.style.pointerEvents = 'none';
-              activeNote.style.display = 'block';
               slider.style[isRtlDir ? 'right' : 'left'] = '2px';
+              track.style.background = 'var(--glass-border)';
+              track.style.boxShadow = 'none';
+            }
+          }
+
+          function onIntervalChange() {
+            const select = document.getElementById('refreshIntervalSelect');
+            if (select.value === '0') {
+              // Show confirmation dialog for immediate mode
+              document.getElementById('immediateConfirmOverlay').style.display = 'flex';
+            } else {
+              _previousIntervalValue = select.value;
+            }
+          }
+
+          function confirmImmediateMode() {
+            document.getElementById('immediateConfirmOverlay').style.display = 'none';
+            _previousIntervalValue = '0';
+          }
+
+          function cancelImmediateMode() {
+            document.getElementById('immediateConfirmOverlay').style.display = 'none';
+            const select = document.getElementById('refreshIntervalSelect');
+            select.value = _previousIntervalValue;
+          }
+
+          // Attach change listener to interval dropdown after settings open
+          function attachIntervalListener() {
+            const select = document.getElementById('refreshIntervalSelect');
+            if (select && !select._listenerAttached) {
+              select.addEventListener('change', onIntervalChange);
+              select._listenerAttached = true;
             }
           }
 
@@ -2174,11 +2225,21 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               });
             }
             
+            // Reset interval dropdown to current value
+            const intervalSelect = document.getElementById('refreshIntervalSelect');
+            if (intervalSelect) {
+              intervalSelect.value = String(currentRefreshInterval);
+              _previousIntervalValue = String(currentRefreshInterval);
+            }
+
             modal.style.display = 'flex';
+            attachIntervalListener();
           }
 
           function closeSettings() {
             document.getElementById('settingsModal').style.display = 'none';
+            // Also close the immediate confirm overlay if open
+            document.getElementById('immediateConfirmOverlay').style.display = 'none';
           }
 
           function saveSettings() {
@@ -2188,8 +2249,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             const selectedLang = langSelect ? langSelect.value : 'auto';
             const autoRefreshToggle = document.getElementById('autoRefreshToggle');
             const autoRefreshEnabled = autoRefreshToggle ? autoRefreshToggle.checked : true;
-            const intervalInput = document.getElementById('refreshIntervalInput');
-            const refreshInterval = intervalInput ? Math.max(1, Math.min(120, parseInt(intervalInput.value) || 15)) : 15;
+            const intervalSelect = document.getElementById('refreshIntervalSelect');
+            const refreshInterval = intervalSelect ? parseInt(intervalSelect.value) : 15;
             
             vscode.postMessage({
               command: 'saveSettings',
