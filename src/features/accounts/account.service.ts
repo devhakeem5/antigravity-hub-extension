@@ -273,6 +273,7 @@ export class AccountService {
 
     let successCount = 0;
     const config = ExtensionConfig.getInstance();
+    let accountsProcessed = 0;
 
     for (const account of accounts) {
       // ── Check for cancellation ──
@@ -280,6 +281,27 @@ export class AccountService {
         Logger.getInstance().info('Refresh cancelled by user.');
         break;
       }
+
+      // ── Anti-Ban: Random delay between accounts (200ms to 4s) ──
+      if (accountsProcessed > 0) {
+        const delay = Math.floor(Math.random() * (4000 - 200 + 1)) + 200;
+        Logger.getInstance().debug(`Anti-ban: Sleeping for ${delay}ms before refreshing ${account.email}`);
+        
+        await new Promise(resolve => {
+          const timer = setTimeout(resolve, delay);
+          options?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            resolve(undefined);
+          }, { once: true });
+        });
+
+        if (options?.signal?.aborted) {
+          Logger.getInstance().info('Refresh cancelled during anti-ban delay.');
+          break;
+        }
+      }
+
+      accountsProcessed++;
 
       // Notify UI: this account is starting
       options?.onAccountStart?.(account.email);
