@@ -202,13 +202,15 @@ export class AccountService {
    * Workflow: Refresh all balances
    * Loops through all stored accounts and updates their credits/status.
    * 
-   * Supports per-account progress callbacks and cancellation.
+   *   - When auto-refresh is disabled — only the active account gets updated.
+   *   - When the user is searching — only the visible accounts are refreshed.
    * @param notify Whether to show toast notification on completion
    * @param options.onAccountStart Called when an individual account starts refreshing
    * @param options.onAccountDone  Called when an individual account finishes (success or skip)
    * @param options.onComplete     Called when all accounts are done
    * @param options.signal         AbortSignal to cancel the refresh mid-loop
    * @param options.orderedEmails  If provided, accounts are refreshed in this order (matching UI display order)
+   * @param options.onlyEmails     If provided, only accounts matching these emails are refreshed
    */
   async refreshBalancesWorkflow(
     notify: boolean = true,
@@ -218,6 +220,7 @@ export class AccountService {
       onComplete?: () => void;
       signal?: AbortSignal;
       orderedEmails?: string[];
+      onlyEmails?: string[];
     }
   ): Promise<void> {
     // ── Guard: Prevent concurrent or rapid-fire refreshes ──
@@ -248,6 +251,13 @@ export class AccountService {
     try {
     let accounts = await this.accountRepo.getAllAccounts();
     if (accounts.length === 0) { this._isRefreshing = false; return; }
+
+    // Filter to specific accounts if requested (e.g., search-filtered refresh)
+    if (options?.onlyEmails && options.onlyEmails.length > 0) {
+      const filterSet = new Set(options.onlyEmails.map(e => e.toLowerCase()));
+      accounts = accounts.filter(a => filterSet.has(a.email.toLowerCase()));
+      if (accounts.length === 0) { this._isRefreshing = false; return; }
+    }
 
     // Reorder accounts to match UI display order if provided
     if (options?.orderedEmails && options.orderedEmails.length > 0) {

@@ -125,7 +125,9 @@
     "more": "المزيد",
     "exportAccounts": "تصدير الحسابات",
     "importAccounts": "استيراد حسابات",
-    "settings": "الإعدادات"
+    "settings": "الإعدادات",
+    "searchPlaceholder": "ابحث بالاسم أو البريد الإلكتروني...",
+    "noSearchResults": "لا توجد حسابات تطابق بحثك."
   },
   "statusBar": {
     "noAccount": "لا يوجد حساب",

@@ -60,6 +60,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
    */
   private _pinnedActiveEmail: string | null = null;
 
+  /** Current search query preserved across webview re-renders */
+  private _searchQuery: string = '';
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly accountRepo: IAccountRepository,
@@ -118,7 +121,14 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         case 'refreshAccounts':
-          await this.handleProgressiveRefresh();
+          if (message.filteredEmails && message.filteredEmails.length === 0) {
+            // Search mode with no visible results — do nothing
+            break;
+          }
+          await this.handleProgressiveRefresh(true, message.filteredEmails || undefined);
+          break;
+        case 'searchChanged':
+          this._searchQuery = message.query || '';
           break;
         case 'cancelRefresh':
           if (this._refreshAbortController) {
@@ -278,7 +288,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
    * show a small loading indicator on each card individually instead of
    * a full-screen overlay.
    */
-  private async handleProgressiveRefresh(notify: boolean = true): Promise<void> {
+  private async handleProgressiveRefresh(notify: boolean = true, onlyEmails?: string[]): Promise<void> {
     // Step 0: Detect and pin active account BEFORE starting the balance refresh.
     // This is an independent verification — it always runs regardless of cooldowns.
     await this.detectAndPinActiveAccount();
@@ -286,7 +296,14 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
     // Step 1: Compute the display order so the refresh iterates accounts in
     // the same top-to-bottom sequence visible in the UI.
-    const orderedEmails = await this.getDisplayOrderEmails();
+    let orderedEmails = await this.getDisplayOrderEmails();
+
+    // If only specific emails should be refreshed (search-filtered), narrow the list
+    if (onlyEmails && onlyEmails.length > 0) {
+      const filterSet = new Set(onlyEmails.map(e => e.toLowerCase()));
+      orderedEmails = orderedEmails.filter(e => filterSet.has(e.toLowerCase()));
+    }
+
     const totalAccounts = orderedEmails.length;
     let currentIndex = 0;
 
@@ -301,6 +318,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       await this.accountService.refreshBalancesWorkflow(notify, {
         signal,
         orderedEmails,
+        onlyEmails,
         onAccountStart: (email: string) => {
           currentIndex++;
           this._view?.webview.postMessage({ command: 'accountRefreshStart', email, currentIndex, totalAccounts });
@@ -309,14 +327,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           this._view?.webview.postMessage({ command: 'accountRefreshDone', email, balances: updatedBalances, status: updatedStatus });
         },
         onComplete: () => {
-          // Re-render to apply re-sorting after all accounts are done.
-          // The _pinnedActiveEmail is preserved, so the pinned account stays on top.
           this.refresh();
         }
       });
     } finally {
       this._refreshAbortController = null;
-      // Always tell webview to re-enable UI (even on cancel/error)
       const wasCancelled = !!signal.aborted;
       this._view?.webview.postMessage({ command: 'refreshFinished', wasCancelled });
     }
@@ -1108,7 +1123,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       }
 
       return `
-        <div class="account-card ${acc.isActive ? 'active' : ''} ${isExpired ? 'expired' : ''}" data-email="${acc.email}">
+        <div class="account-card ${acc.isActive ? 'active' : ''} ${isExpired ? 'expired' : ''}" data-email="${acc.email}" data-name="${acc.displayName}">
           <div class="card-header">
             ${acc.avatarUrl ? `<img class="avatar ${isExpired ? 'avatar-expired' : ''}" src="${acc.avatarUrl}" alt="${acc.displayName}" />` : `<div class="avatar ${isExpired ? 'avatar-expired' : ''}">${acc.displayName.charAt(0).toUpperCase()}</div>`}
             <div class="user-info">
@@ -1707,6 +1722,82 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             .badge { font-size: 0.6rem; padding: 3px 6px; }
           }
 
+          /* ── Search ── */
+          .search-container {
+            position: relative;
+            margin-bottom: 16px;
+          }
+          .search-input {
+            width: 100%;
+            padding: 9px 34px 9px 12px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+          }
+          [dir="rtl"] .search-input {
+            padding: 9px 12px 9px 34px;
+          }
+          .search-input:focus {
+            border-color: var(--focus-border);
+          }
+          .search-input::placeholder {
+            color: var(--text-secondary);
+            opacity: 0.6;
+          }
+          .search-input:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+          }
+          .search-clear-btn {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.85rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            line-height: 1;
+            display: none;
+          }
+          [dir="rtl"] .search-clear-btn {
+            right: auto;
+            left: 8px;
+          }
+          .search-clear-btn:hover {
+            color: var(--text-primary);
+            background: var(--surface-light);
+          }
+          .search-no-results {
+            text-align: center;
+            padding: 30px 20px;
+            color: var(--text-secondary);
+            display: none;
+          }
+          .search-no-results-icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            opacity: 0.5;
+          }
+          .search-no-results p {
+            font-size: 0.85rem;
+            margin: 0;
+          }
+
+          .account-card.search-hidden {
+            display: none !important;
+          }
+
           /* ── Top progress banner for refresh ── */
           .refresh-progress-banner {
             display: none;
@@ -1952,6 +2043,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           </div>
         </div>
 
+        ${accounts.length > 0 ? `
+        <div class="search-container" id="searchContainer">
+          <input type="text" id="searchInput" class="search-input" placeholder="${i18n.t('accounts.searchPlaceholder')}" autocomplete="off" />
+          <button class="search-clear-btn" id="searchClearBtn" onclick="clearSearch()">✕</button>
+        </div>` : ''}
+
         <div id="accounts-list">
           <!-- Refresh Progress Banner -->
           <div id="refreshProgressBanner" class="refresh-progress-banner">
@@ -1966,6 +2063,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           <!-- Refresh Toast -->
           <div id="refreshToast" class="refresh-toast"></div>
           ${accountCardsHtml}
+          <!-- Search No Results -->
+          <div id="searchNoResults" class="search-no-results">
+            <div class="search-no-results-icon">🔍</div>
+            <p>${i18n.t('accounts.noSearchResults')}</p>
+          </div>
         </div>
 
         <!-- Cancel Confirmation Dialog -->
@@ -2056,6 +2158,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           const currentAutoRefresh = ${configAutoRefresh};
           const currentRefreshInterval = ${configRefreshInterval};
           const isRtlDir = ${isRtl};
+          const savedSearchQuery = ${JSON.stringify(this._searchQuery)};
           
           const vscode = acquireVsCodeApi();
 
@@ -2083,8 +2186,112 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           let isRefreshing = false;
           function handleRefresh() {
             if (isRefreshing) return;
-            sendMessage('refreshAccounts');
+            const searchInput = document.getElementById('searchInput');
+            const query = searchInput ? searchInput.value.trim() : '';
+            if (query) {
+              // Flush any pending debounce and apply filter immediately
+              if (searchDebounceTimer) {
+                clearTimeout(searchDebounceTimer);
+                searchDebounceTimer = null;
+              }
+              applySearchFilter(query);
+              // Now collect visible (filtered) account emails
+              const visibleCards = document.querySelectorAll('.account-card:not(.search-hidden)');
+              if (visibleCards.length === 0) return; // No results, do nothing
+              const filteredEmails = Array.from(visibleCards).map(c => c.dataset.email);
+              vscode.postMessage({ command: 'refreshAccounts', filteredEmails });
+            } else {
+              sendMessage('refreshAccounts');
+            }
           }
+
+          // ── Search ──
+          let searchDebounceTimer = null;
+
+          function applySearchFilter(query) {
+            const cards = document.querySelectorAll('.account-card');
+            const noResults = document.getElementById('searchNoResults');
+            const clearBtn = document.getElementById('searchClearBtn');
+            const q = query.toLowerCase().trim();
+
+            if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+
+            if (!q) {
+              // Show all cards, hide no-results
+              cards.forEach(c => c.classList.remove('search-hidden'));
+              if (noResults) noResults.style.display = 'none';
+              return;
+            }
+
+            let visibleCount = 0;
+            cards.forEach(card => {
+              const email = (card.dataset.email || '').toLowerCase();
+              const name = (card.dataset.name || '').toLowerCase();
+              if (email.includes(q) || name.includes(q)) {
+                card.classList.remove('search-hidden');
+                visibleCount++;
+              } else {
+                card.classList.add('search-hidden');
+              }
+            });
+
+            if (noResults) noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+          }
+
+          function onSearchInput(e) {
+            const query = e.target.value;
+            // Notify provider to preserve query across re-renders
+            vscode.postMessage({ command: 'searchChanged', query });
+            if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => {
+              applySearchFilter(query);
+            }, 300);
+          }
+
+          function clearSearch() {
+            const input = document.getElementById('searchInput');
+            if (input) { input.value = ''; input.focus(); }
+            if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+            applySearchFilter('');
+            vscode.postMessage({ command: 'searchChanged', query: '' });
+          }
+
+          function setSearchDisabled(disabled) {
+            const input = document.getElementById('searchInput');
+            const clearBtn = document.getElementById('searchClearBtn');
+            if (input) input.disabled = disabled;
+            if (clearBtn && disabled) clearBtn.style.display = 'none';
+          }
+
+          // Attach search listener and restore state
+          (function initSearch() {
+            const input = document.getElementById('searchInput');
+            if (input) {
+              input.addEventListener('input', onSearchInput);
+              
+              // Track focus state to restore it after re-renders
+              input.addEventListener('focus', () => {
+                const st = vscode.getState() || {};
+                vscode.setState({ ...st, searchFocused: true });
+              });
+              input.addEventListener('blur', () => {
+                const st = vscode.getState() || {};
+                vscode.setState({ ...st, searchFocused: false });
+              });
+
+              // Restore search query from provider state
+              if (savedSearchQuery) {
+                input.value = savedSearchQuery;
+                applySearchFilter(savedSearchQuery);
+              }
+
+              // Restore focus if it was focused before re-render
+              const currentState = vscode.getState() || {};
+              if (currentState.searchFocused && !input.disabled) {
+                input.focus();
+              }
+            }
+          })();
 
           // ── Cancel confirmation ──
           function showCancelConfirm() {
@@ -2408,6 +2615,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             if (msg.command === 'refreshStarted') {
               isRefreshing = true;
               setActionsDisabled(true);
+              setSearchDisabled(true);
               showProgressBanner();
 
             } else if (msg.command === 'accountRefreshStart') {
@@ -2419,6 +2627,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             } else if (msg.command === 'refreshFinished') {
               isRefreshing = false;
               setActionsDisabled(false);
+              setSearchDisabled(false);
               // Dismiss cancel dialog if still open (refresh finished naturally)
               dismissCancelConfirm();
               hideProgressBanner(!!msg.wasCancelled);

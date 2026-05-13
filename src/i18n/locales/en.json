@@ -125,7 +125,9 @@
     "more": "More",
     "exportAccounts": "Export Accounts",
     "importAccounts": "Import Accounts",
-    "settings": "Settings"
+    "settings": "Settings",
+    "searchPlaceholder": "Search by name or email...",
+    "noSearchResults": "No accounts match your search."
   },
   "statusBar": {
     "noAccount": "No account",
