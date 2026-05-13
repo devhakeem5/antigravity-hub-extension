@@ -1818,8 +1818,24 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
             min-width: 0;
+          }
+          .refresh-progress-stats {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+          }
+          .refresh-progress-count {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            background: rgba(128, 128, 128, 0.1);
+            padding: 2px 8px;
+            border-radius: 6px;
+            border: 1px solid var(--glass-border);
+            white-space: nowrap;
           }
           .refresh-progress-email {
             font-size: 0.82rem;
@@ -2054,7 +2070,10 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           <div id="refreshProgressBanner" class="refresh-progress-banner">
             <div class="refresh-progress-info">
               <span class="refresh-progress-email" id="refreshProgressEmail"></span>
-              <span class="refresh-progress-percent" id="refreshProgressPercent">0%</span>
+              <div class="refresh-progress-stats">
+                <span class="refresh-progress-count" id="refreshProgressCount">0/0</span>
+                <span class="refresh-progress-percent" id="refreshProgressPercent">0%</span>
+              </div>
             </div>
             <div class="refresh-progress-bar-track">
               <div class="refresh-progress-bar-fill" id="refreshProgressBar"></div>
@@ -2569,11 +2588,15 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           // ── Progress Banner Management ──
           let refreshToastTimeout = null;
 
-          function showProgressBanner() {
+          function showProgressBanner(totalAccounts = 0) {
             // Clear any existing toast
             const toast = document.getElementById('refreshToast');
             if (toast) { toast.classList.remove('visible'); }
             if (refreshToastTimeout) { clearTimeout(refreshToastTimeout); refreshToastTimeout = null; }
+            
+            // Initialize count display
+            const countEl = document.getElementById('refreshProgressCount');
+            if (countEl) countEl.textContent = '0 / ' + totalAccounts;
             
             const banner = document.getElementById('refreshProgressBanner');
             if (banner) banner.classList.add('visible');
@@ -2582,12 +2605,14 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           function updateProgressBanner(email, currentIndex, totalAccounts) {
             const emailEl = document.getElementById('refreshProgressEmail');
             const percentEl = document.getElementById('refreshProgressPercent');
+            const countEl = document.getElementById('refreshProgressCount');
             const barEl = document.getElementById('refreshProgressBar');
             
             const percent = totalAccounts > 0 ? Math.round((currentIndex / totalAccounts) * 100) : 0;
             
             if (emailEl) emailEl.innerHTML = '<span class="refresh-label">${i18n.t('accounts.refreshingAccount')}: </span>' + email;
             if (percentEl) percentEl.textContent = percent + '%';
+            if (countEl) countEl.textContent = currentIndex + ' / ' + totalAccounts;
             if (barEl) barEl.style.width = percent + '%';
           }
 
@@ -2616,7 +2641,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               isRefreshing = true;
               setActionsDisabled(true);
               setSearchDisabled(true);
-              showProgressBanner();
+              showProgressBanner(msg.totalAccounts);
 
             } else if (msg.command === 'accountRefreshStart') {
               updateProgressBanner(msg.email, msg.currentIndex, msg.totalAccounts);
