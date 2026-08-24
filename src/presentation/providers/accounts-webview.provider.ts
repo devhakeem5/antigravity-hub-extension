@@ -13,12 +13,12 @@ import { IAccountRepository } from '../../core/domain/repositories/account.repos
 import { AccountService } from '../../features/accounts/account.service';
 import { I18nService } from '../../i18n/i18n.service';
 import { Logger } from '../../core/utils/logger';
-import { Account, AccountTokens, AccountStatus } from '../../core/domain/models/account.model';
+import { Account, AccountSummary, AccountTokens, AccountStatus } from '../../core/domain/models/account.model';
 import { DeviceProfile } from '../../core/domain/models/device-profile.model';
 import { CryptoUtils } from '../../core/utils/crypto.utils';
 import { ExtensionConfig } from '../../core/config/extension.config';
-import { QuotaGroup, QuotaWindow } from '../../core/domain/models/quota-summary.model';
-import { deriveQuotaSummaryFromBalances } from '../../core/utils/quota-summary.utils';
+import { QuotaGroup, QuotaGroupId, QuotaWindow } from '../../core/domain/models/quota-summary.model';
+import { deriveQuotaSummaryFromBalances, getQuotaSortMetrics } from '../../core/utils/quota-summary.utils';
 
 /** Shape of an individual account inside the backup */
 interface ExportedAccount {
@@ -64,6 +64,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
   /** Current search query preserved across webview re-renders */
   private _searchQuery: string = '';
+
+  /** Accounts currently being refreshed from their own card controls. */
+  private readonly _singleAccountRefreshes = new Set<string>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -129,6 +132,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
           await this.handleProgressiveRefresh(true, message.filteredEmails || undefined);
           break;
+        case 'refreshSingleAccount':
+          if (message.email) {
+            void this.handleSingleAccountRefresh(message.email);
+          }
+          break;
         case 'searchChanged':
           this._searchQuery = message.query || '';
           break;
@@ -156,6 +164,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
           if (message.autoRefreshEnabled !== undefined) {
             await vscode.workspace.getConfiguration('antigravityHub').update('autoRefreshEnabled', message.autoRefreshEnabled, vscode.ConfigurationTarget.Global);
+          }
+          if (message.hideGeminiBalances !== undefined) {
+            await vscode.workspace.getConfiguration('antigravityHub').update('hideGeminiBalances', message.hideGeminiBalances, vscode.ConfigurationTarget.Global);
           }
           if (message.refreshIntervalMinutes !== undefined) {
             await vscode.workspace.getConfiguration('antigravityHub').update('refreshIntervalMinutes', message.refreshIntervalMinutes, vscode.ConfigurationTarget.Global);
@@ -339,6 +350,52 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Refreshes one card without blocking unrelated account actions. */
+  private async handleSingleAccountRefresh(email: string): Promise<void> {
+    const normalizedEmail = email.toLowerCase();
+    if (this._singleAccountRefreshes.has(normalizedEmail) || this._refreshAbortController) return;
+
+    const account = await this.accountRepo.getAccount(email);
+    if (
+      !account
+      || account.status === AccountStatus.TOKEN_EXPIRED
+      || this._singleAccountRefreshes.has(normalizedEmail)
+      || this._refreshAbortController
+    ) return;
+
+    this._singleAccountRefreshes.add(normalizedEmail);
+    this._view?.webview.postMessage({ command: 'singleAccountRefreshStart', email: account.email });
+
+    let succeeded = false;
+    try {
+      succeeded = await this.accountService.refreshSingleAccountBalance(account.email);
+      if (!succeeded) {
+        vscode.window.showErrorMessage(
+          I18nService.getInstance().t('accounts.singleRefreshFailed', { email: account.email })
+        );
+      }
+    } catch (error) {
+      Logger.getInstance().error(`Unexpected single-account refresh failure for ${account.email}`, error);
+      vscode.window.showErrorMessage(
+        I18nService.getInstance().t('accounts.singleRefreshFailed', { email: account.email })
+      );
+    } finally {
+      this._singleAccountRefreshes.delete(normalizedEmail);
+      this._view?.webview.postMessage({
+        command: 'singleAccountRefreshDone',
+        email: account.email,
+        succeeded,
+        hasPendingRefreshes: this._singleAccountRefreshes.size > 0
+      });
+
+      // Re-rendering performs the balance-based sort. Defer it until the final
+      // concurrent refresh finishes so the list moves only once.
+      if (this._singleAccountRefreshes.size === 0) {
+        await this.refresh();
+      }
+    }
+  }
+
   // ─── Active Account Refresh (Auto-refresh Disabled) ─────────────────────
 
   /**
@@ -395,19 +452,13 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       acc.isActive = (pinnedEmailLower !== null && acc.email.toLowerCase() === pinnedEmailLower);
     });
 
-    // Apply the same sort: active first, then by preferred model balance
-    const preferredModel = await this.accountRepo.getPreferredModel();
-    const effectivePreferred = preferredModel || '';
+    // Apply the same sort: active first, then by the selected quota group.
+    const preferredGroup = await this.resolvePreferredQuotaGroup();
 
     accounts.sort((a, b) => {
       if (a.isActive && !b.isActive) return -1;
       if (!a.isActive && b.isActive) return 1;
-      if (effectivePreferred) {
-        const aVal = this.getModelBalanceValue(a.balances, effectivePreferred);
-        const bVal = this.getModelBalanceValue(b.balances, effectivePreferred);
-        return bVal - aVal;
-      }
-      return 0;
+      return this.compareAccountsByQuotaGroup(a, b, preferredGroup);
     });
 
     return accounts.map(a => a.email);
@@ -702,6 +753,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
   private async _getHtmlForWebview(webview: vscode.Webview): Promise<string> {
     const i18n = I18nService.getInstance();
     const isRtl = i18n.getLocale() === 'ar';
+    const geminiIconUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'resources', 'icons', 'gemini-color.svg')
+    );
+    const claudeIconUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'resources', 'icons', 'claude-color.svg')
+    );
 
     // ── Not-Antigravity screen ──
     if (!this.isAntigravityEditor()) {
@@ -750,6 +807,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
     const configLanguage = vscode.workspace.getConfiguration('antigravityHub').get<string>('language', 'auto');
     const configAutoRefresh = vscode.workspace.getConfiguration('antigravityHub').get<boolean>('autoRefreshEnabled', true);
+    const configHideGeminiBalances = vscode.workspace.getConfiguration('antigravityHub').get<boolean>('hideGeminiBalances', true);
     const configRefreshInterval = vscode.workspace.getConfiguration('antigravityHub').get<number>('refreshIntervalMinutes', 15);
     const accounts = await this.accountRepo.getAccountSummaries();
 
@@ -765,33 +823,15 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     });
 
     // ── Preferred Model Resolution ──
-    // Extract available model keys from first account with balances (after filtering)
-    let availableModelKeys: string[] = [];
-    const accountWithBalances = accounts.find(a => a.balances && Object.keys(a.balances).length > 0);
-    if (accountWithBalances) {
-      availableModelKeys = this.extractFilteredModelKeys(accountWithBalances.balances);
-    }
-
-    // Read stored preference (null = never set, "" = explicitly none)
-    let preferredModel = await this.accountRepo.getPreferredModel();
-    if (preferredModel === null && availableModelKeys.length > 0) {
-      // Auto-detect: find newest Claude model
-      preferredModel = this.findNewestClaudeKey(availableModelKeys) || '';
-      await this.accountRepo.setPreferredModel(preferredModel);
-    }
-    const effectivePreferred = preferredModel || '';
+    // Migrate the former model-level preference to one of the two quota groups.
+    const effectivePreferred = await this.resolvePreferredQuotaGroup();
 
     // ── Sort accounts ──
-    // Active account always first (overrides all rules), then by preferred model balance
+    // Active account always first, then by the selected quota group's effective limit.
     accounts.sort((a, b) => {
       if (a.isActive && !b.isActive) return -1;
       if (!a.isActive && b.isActive) return 1;
-      if (effectivePreferred) {
-        const aVal = this.getModelBalanceValue(a.balances, effectivePreferred);
-        const bVal = this.getModelBalanceValue(b.balances, effectivePreferred);
-        return bVal - aVal;
-      }
-      return 0;
+      return this.compareAccountsByQuotaGroup(a, b, effectivePreferred);
     });
 
     const formatTime = (resetTimeStr?: string) => {
@@ -824,6 +864,10 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const renderQuotaWindow = (window: QuotaWindow, title: string): string => {
       const exhausted = window.remainingPercent <= 0;
       const colorClass = quotaColorClass(window.remainingPercent);
+      const windowClass = window.id === 'five-hour' ? 'quota-window-five-hour' : 'quota-window-weekly';
+      const windowIcon = window.id === 'five-hour'
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="6" width="14" height="13" rx="2"/><path d="M8 4v4M16 4v4M5 10h14"/></svg>';
       const valueHtml = exhausted
         ? `<span class="quota-renewal ${window.resetTime ? '' : 'quota-renewal-unknown'}">${window.resetTime
           ? formatTime(window.resetTime)
@@ -831,9 +875,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         : `<span class="quota-percentage ${colorClass}-text">${window.remainingPercent}%</span>`;
 
       return `
-        <div class="quota-window ${exhausted ? 'is-exhausted' : ''}">
+        <div class="quota-window ${windowClass} ${exhausted ? 'is-exhausted' : ''}">
           <div class="quota-window-header">
-            <span class="quota-window-title">${title}</span>
+            <span class="quota-window-title"><span class="quota-window-icon">${windowIcon}</span>${title}</span>
             ${valueHtml}
           </div>
           <div class="progress-bar-container" role="progressbar" aria-label="${title}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${window.remainingPercent}">
@@ -846,14 +890,38 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       const title = group.id === 'gemini'
         ? i18n.t('webview.geminiModels')
         : i18n.t('webview.claudeGptModels');
+      const groupIconUri = group.id === 'gemini' ? geminiIconUri : claudeIconUri;
+      const groupIcon = `<img src="${groupIconUri}" alt="" aria-hidden="true" />`;
       const windows = [
         group.weekly ? renderQuotaWindow(group.weekly, i18n.t('webview.weeklyLimitRemaining')) : '',
         group.fiveHour ? renderQuotaWindow(group.fiveHour, i18n.t('webview.fiveHourLimitRemaining')) : '',
       ].filter(Boolean).join('');
       return windows ? `
-        <section class="quota-group" aria-label="${title}">
-          <h5 class="quota-group-title">${title}</h5>
+        <section class="quota-group quota-group-${group.id}" aria-label="${title}">
+          <h5 class="quota-group-title"><span class="quota-group-icon">${groupIcon}</span>${title}</h5>
           <div class="quota-windows">${windows}</div>
+        </section>` : '';
+    };
+
+    const renderCollapsedGeminiGroup = (group: QuotaGroup): string => {
+      const title = i18n.t('webview.geminiModels');
+      const windows = [
+        group.weekly ? renderQuotaWindow(group.weekly, i18n.t('webview.weeklyLimitRemaining')) : '',
+        group.fiveHour ? renderQuotaWindow(group.fiveHour, i18n.t('webview.fiveHourLimitRemaining')) : '',
+      ].filter(Boolean).join('');
+
+      return windows ? `
+        <section class="quota-group quota-group-gemini quota-group-disclosure" aria-label="${title}">
+          <button type="button" class="quota-disclosure-toggle" onclick="toggleGeminiQuota(this)" aria-expanded="false">
+            <span class="quota-disclosure-label">
+              <span class="quota-group-icon"><img src="${geminiIconUri}" alt="" aria-hidden="true" /></span>
+              <span>${title}</span>
+            </span>
+            <svg class="quota-disclosure-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>
+          </button>
+          <div class="quota-disclosure-content" hidden>
+            <div class="quota-windows">${windows}</div>
+          </div>
         </section>` : '';
     };
 
@@ -1122,11 +1190,15 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       }
 
       const isExpired = acc.status === AccountStatus.TOKEN_EXPIRED;
-      const activeBadge = acc.isActive
-        ? `<div class="badge active-badge">${i18n.t('accounts.active')}</div>`
-        : isExpired
-          ? `<div class="badge expired-badge">${i18n.t('accounts.expired')}</div>`
-          : '';
+      const isSingleRefreshing = this._singleAccountRefreshes.has(acc.email.toLowerCase());
+      const actionDisabled = isSingleRefreshing ? ' disabled' : '';
+      const statusBadge = isExpired
+        ? `<div class="badge expired-badge">${i18n.t('accounts.expired')}</div>`
+        : '';
+      const refreshButtonHtml = isExpired ? '' : `
+        <button type="button" class="btn-refresh-account" onclick="handleSingleAccountRefresh(this, '${acc.email}')" title="${i18n.t('accounts.refreshAccount')}" aria-label="${i18n.t('accounts.refreshAccount')}"${actionDisabled}>
+          <svg class="refresh-account-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.5-2.6L20 9M4 15l2.4 2.6A7 7 0 0 0 17.9 15"/></svg>
+        </button>`;
 
       // For expired accounts, show a warning banner instead of models
       const expiredBannerHtml = isExpired ? `
@@ -1139,7 +1211,17 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       const quotaSummary = acc.quotaSummary && acc.quotaSummary.length > 0
         ? acc.quotaSummary
         : deriveQuotaSummaryFromBalances(acc.balances);
-      const quotaHtml = quotaSummary.map(renderQuotaGroup).filter(Boolean).join('')
+      const orderedQuotaGroups = configHideGeminiBalances
+        ? [
+          ...quotaSummary.filter(group => group.id === 'claude-gpt'),
+          ...quotaSummary.filter(group => group.id === 'gemini'),
+        ]
+        : quotaSummary;
+      const quotaHtml = orderedQuotaGroups.map(group =>
+        configHideGeminiBalances && group.id === 'gemini'
+          ? renderCollapsedGeminiGroup(group)
+          : renderQuotaGroup(group)
+      ).filter(Boolean).join('')
         || `<div class="empty-models">${i18n.t('webview.noQuotaData')}</div>`;
 
       // Build card body: unified quota groups only for non-expired accounts
@@ -1153,25 +1235,30 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       let actionsHtml = '';
       if (isExpired) {
         actionsHtml = `
-          <button class="btn btn-warning" onclick="sendMessage('reAuthenticate', '${acc.email}')">${i18n.t('accounts.reAuthenticate')}</button>
-          <button class="btn btn-danger" onclick="sendMessage('deleteAccount', '${acc.email}')">${i18n.t('accounts.remove')}</button>
+          <button class="btn btn-warning" onclick="sendMessage('reAuthenticate', '${acc.email}')"${actionDisabled}>${i18n.t('accounts.reAuthenticate')}</button>
+          <button class="btn btn-danger" onclick="sendMessage('deleteAccount', '${acc.email}')"${actionDisabled}>${i18n.t('accounts.remove')}</button>
         `;
       } else {
         actionsHtml = `
-          ${!acc.isActive ? `<button class="btn btn-primary" onclick="handleSwitchAccount(this, '${acc.email}')">${i18n.t('accounts.activate')}</button>` : ''}
-          <button class="btn btn-danger" onclick="sendMessage('deleteAccount', '${acc.email}')">${i18n.t('accounts.remove')}</button>
+          ${!acc.isActive ? `<button class="btn btn-primary btn-adaptive-action" onclick="handleSwitchAccount(this, '${acc.email}')" title="${i18n.t('accounts.activate')}" aria-label="${i18n.t('accounts.activate')}"${actionDisabled}><span class="btn-responsive-label">${i18n.t('accounts.activate')}</span><svg class="btn-responsive-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 8l4 4-4 4M9 12h9"/></svg></button>` : ''}
+          <button class="btn btn-danger btn-adaptive-action" onclick="sendMessage('deleteAccount', '${acc.email}')" title="${i18n.t('accounts.remove')}" aria-label="${i18n.t('accounts.remove')}"${actionDisabled}><span class="btn-responsive-label">${i18n.t('accounts.remove')}</span><svg class="btn-responsive-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>
         `;
       }
 
       return `
-        <div class="account-card ${acc.isActive ? 'active' : ''} ${isExpired ? 'expired' : ''}" data-email="${acc.email}" data-name="${acc.displayName}">
+        <div class="account-card ${acc.isActive ? 'active' : ''} ${isExpired ? 'expired' : ''} ${isSingleRefreshing ? 'account-refreshing' : ''}" data-email="${acc.email}" data-name="${acc.displayName}" aria-busy="${isSingleRefreshing}">
+          <div class="account-refresh-overlay" role="status" aria-live="polite">
+            <span class="account-refresh-spinner"></span>
+            <span>${i18n.t('accounts.refreshingAccount')}</span>
+          </div>
+          ${refreshButtonHtml}
           <div class="card-header">
             ${acc.avatarUrl ? `<img class="avatar ${isExpired ? 'avatar-expired' : ''}" src="${acc.avatarUrl}" alt="${acc.displayName}" />` : `<div class="avatar ${isExpired ? 'avatar-expired' : ''}">${acc.displayName.charAt(0).toUpperCase()}</div>`}
             <div class="user-info">
               <h4>${acc.displayName}</h4>
               <p>${acc.email}</p>
             </div>
-            ${activeBadge}
+            ${statusBadge}
           </div>
           
           ${cardBody}
@@ -1293,12 +1380,49 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             background: var(--surface-color);
           }
 
+          .account-refresh-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 4;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            border-radius: inherit;
+            background: color-mix(in srgb, var(--surface-color) 92%, transparent);
+            color: var(--text-primary);
+            font-size: 0.82rem;
+            font-weight: 650;
+          }
+
+          .account-card.account-refreshing {
+            transform: none;
+          }
+
+          .account-card.account-refreshing .account-refresh-overlay {
+            display: flex;
+          }
+
+          .account-refresh-spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--glass-border);
+            border-top-color: var(--primary-light);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+          }
+
           .card-header {
             display: flex;
             align-items: center;
             gap: 12px;
             margin-bottom: 16px;
+            padding-right: 38px;
             min-width: 0;
+          }
+
+          .account-card.expired .card-header {
+            padding-right: 0;
           }
 
           .avatar {
@@ -1384,6 +1508,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
           .card-actions {
             display: flex;
+            flex-wrap: wrap;
             gap: 8px;
             justify-content: flex-end;
           }
@@ -1428,26 +1553,124 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
 
           .quota-group {
+            --quota-group-accent: var(--primary-light);
             min-width: 0;
           }
 
+          .quota-group-gemini {
+            --quota-group-accent: var(--vscode-charts-blue, #4f8cff);
+          }
+
+          .quota-group-claude-gpt {
+            --quota-group-accent: var(--vscode-charts-orange, #d18b47);
+          }
+
           .quota-group-title {
-            margin: 0 0 8px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin: 0;
+            padding: 7px 9px;
             color: var(--text-primary);
             font-size: 0.82rem;
             font-weight: 700;
             line-height: 1.35;
             overflow-wrap: anywhere;
+            background: color-mix(in srgb, var(--quota-group-accent) 9%, transparent);
+            border-bottom: 1px solid color-mix(in srgb, var(--quota-group-accent) 45%, var(--border-color));
+            border-radius: 7px 7px 0 0;
+          }
+
+          .quota-group-icon {
+            display: inline-flex;
+            flex: 0 0 auto;
+            width: 17px;
+            height: 17px;
+          }
+
+          .quota-group-icon img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+          }
+
+          .quota-disclosure-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            width: 100%;
+            padding: 7px 9px;
+            color: var(--text-primary);
+            font: inherit;
+            font-size: 0.82rem;
+            font-weight: 700;
+            line-height: 1.35;
+            text-align: start;
+            background: color-mix(in srgb, var(--quota-group-accent) 9%, transparent);
+            border: 0;
+            border-bottom: 1px solid color-mix(in srgb, var(--quota-group-accent) 45%, var(--border-color));
+            border-radius: 7px;
+            cursor: pointer;
+          }
+
+          .quota-disclosure-toggle:hover {
+            background: color-mix(in srgb, var(--quota-group-accent) 15%, transparent);
+          }
+
+          .quota-disclosure-toggle:focus-visible {
+            outline: 2px solid var(--vscode-focusBorder);
+            outline-offset: 2px;
+          }
+
+          .quota-disclosure-toggle[aria-expanded="true"] {
+            border-radius: 7px 7px 0 0;
+          }
+
+          .quota-disclosure-label {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            min-width: 0;
+            overflow-wrap: anywhere;
+          }
+
+          .quota-disclosure-chevron {
+            flex: 0 0 auto;
+            width: 16px;
+            height: 16px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            transition: transform 160ms ease-out;
+          }
+
+          .quota-disclosure-toggle[aria-expanded="true"] .quota-disclosure-chevron {
+            transform: rotate(180deg);
+          }
+
+          .quota-disclosure-content[hidden] {
+            display: none;
+          }
+
+          .quota-window-icon svg {
+            width: 100%;
+            height: 100%;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.7;
+            stroke-linecap: round;
+            stroke-linejoin: round;
           }
 
           .quota-windows {
             display: flex;
             flex-direction: column;
-            gap: 9px;
-            padding: 10px 12px;
-            background: var(--glass-bg);
-            border: 1px solid var(--glass-border);
-            border-radius: 8px;
+            gap: 10px;
+            padding: 10px 9px 2px;
           }
 
           .quota-window {
@@ -1455,7 +1678,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
 
           .quota-window + .quota-window {
-            padding-top: 9px;
+            padding-top: 10px;
             border-top: 1px solid var(--glass-border);
           }
 
@@ -1469,12 +1692,34 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
 
           .quota-window-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
             min-width: 0;
             color: var(--text-secondary);
             font-size: 0.75rem;
             font-weight: 600;
             line-height: 1.35;
             overflow-wrap: anywhere;
+          }
+
+          .quota-window-icon {
+            display: inline-flex;
+            flex: 0 0 auto;
+            width: 14px;
+            height: 14px;
+            color: var(--quota-group-accent);
+          }
+
+          .quota-window-weekly .progress-bar-container {
+            height: 4px;
+            border-radius: 2px;
+          }
+
+          .quota-window-five-hour .progress-bar-container {
+            height: 7px;
+            border-radius: 999px;
+            box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--quota-group-accent) 18%, transparent);
           }
 
           .quota-percentage {
@@ -1726,6 +1971,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             color: var(--vscode-button-foreground);
           }
 
+          .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+
           .btn-primary {
             background: var(--primary-color);
             border: 1px solid var(--primary-dark);
@@ -1733,6 +1983,66 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           .btn-primary:hover { 
             background: var(--primary-dark); 
             box-shadow: 0 2px 6px var(--shadow-color);
+          }
+
+          .btn-refresh-account {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 3;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            background: var(--primary-color);
+            color: var(--vscode-button-foreground, #ffffff);
+            border: 1px solid var(--primary-dark);
+            border-radius: 6px;
+            cursor: pointer;
+          }
+
+          .btn-refresh-account:hover:not(:disabled) {
+            background: var(--primary-dark);
+          }
+
+          .btn-refresh-account:focus-visible {
+            outline: 1px solid var(--focus-border);
+            outline-offset: 2px;
+          }
+
+          .btn-refresh-account:disabled {
+            opacity: 0.58;
+            background: color-mix(in srgb, var(--primary-color) 72%, var(--surface-color));
+            border-color: color-mix(in srgb, var(--primary-dark) 65%, var(--border-color));
+            pointer-events: none;
+            cursor: not-allowed;
+          }
+
+          .refresh-account-icon {
+            width: 16px;
+            height: 16px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+          }
+
+          .btn-responsive-icon {
+            display: none;
+            width: 16px;
+            height: 16px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            .account-refresh-spinner { animation: none; }
           }
 
           .btn-danger {
@@ -1833,6 +2143,17 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             .quota-window-header { align-items: flex-start; flex-direction: column; gap: 3px; }
             .quota-renewal { text-align: start; }
             .btn { padding: 5px 10px; font-size: 0.75rem; }
+            .btn-adaptive-action {
+              width: 32px;
+              height: 30px;
+              padding: 0;
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+            }
+            .btn-adaptive-action .btn-responsive-label { display: none; }
+            .btn-adaptive-action .btn-responsive-icon { display: block; }
+            .btn-refresh-account { top: 10px; right: 10px; }
             .header-actions h2 { font-size: 0.95rem; }
             .btn-icon { padding: 4px 8px; font-size: 0.8rem; }
           }
@@ -2240,12 +2561,24 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             <div style="margin-bottom: 16px;">
               <label for="preferredModelSelect" style="display:block; margin-bottom:8px; font-weight:bold;">${i18n.t('webview.preferredModelSort')}</label>
               <select id="preferredModelSelect" style="width:100%; padding:8px; background:var(--vscode-dropdown-background); color:var(--vscode-dropdown-foreground); border:1px solid var(--vscode-dropdown-border); border-radius:4px;">
-                <option value="">${i18n.t('webview.noSelectionDefault')}</option>
-                <!-- Options populated by JS -->
+                <option value="gemini" ${effectivePreferred === 'gemini' ? 'selected' : ''}>${i18n.t('webview.geminiModels')}</option>
+                <option value="claude-gpt" ${effectivePreferred === 'claude-gpt' ? 'selected' : ''}>${i18n.t('webview.claudeGptModels')}</option>
               </select>
               <p style="font-size:0.85em; opacity:0.7; margin-top:8px;" id="settingsHelpText">
                 ${i18n.t('webview.sortExplanation')}
               </p>
+            </div>
+
+            <div style="border-top:1px solid var(--border-color); padding-top:16px; margin-bottom:16px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:8px;">
+                <label for="hideGeminiBalancesToggle" style="font-weight:bold; cursor:pointer; line-height:1.4;">${i18n.t('webview.hideGeminiBalancesLabel')}</label>
+                <label style="position:relative; display:inline-block; flex:0 0 auto; width:40px; height:22px; cursor:pointer;">
+                  <input type="checkbox" id="hideGeminiBalancesToggle" ${configHideGeminiBalances ? 'checked' : ''} onchange="onHideGeminiBalancesToggle()" style="opacity:0; width:0; height:0;">
+                  <span id="hideGeminiBalancesTrack" style="position:absolute; inset:0; background:${configHideGeminiBalances ? '#4caf50' : 'var(--glass-border)'}; border-radius:11px; transition:background 0.3s, box-shadow 0.3s; ${configHideGeminiBalances ? 'box-shadow:0 0 6px rgba(76,175,80,0.4);' : ''}"></span>
+                  <span id="hideGeminiBalancesSlider" style="position:absolute; top:2px; ${isRtl ? 'right' : 'left'}:2px; width:18px; height:18px; background:var(--text-primary); border-radius:50%; transition:0.3s; ${configHideGeminiBalances ? (isRtl ? 'right:20px' : 'left:20px') : ''}"></span>
+                </label>
+              </div>
+              <p style="font-size:0.82em; opacity:0.65; margin:0; line-height:1.5;">${i18n.t('webview.hideGeminiBalancesDescription')}</p>
             </div>
 
             <div style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-bottom: 16px;">
@@ -2293,10 +2626,10 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <script>
-          const availableModelKeys = ${JSON.stringify(availableModelKeys)};
-          const currentPreferredModel = ${JSON.stringify(effectivePreferred)};
+          const currentPreferredGroup = ${JSON.stringify(effectivePreferred)};
           const hasAccounts = ${accounts.length > 0};
           const currentAutoRefresh = ${configAutoRefresh};
+          const currentHideGeminiBalances = ${configHideGeminiBalances};
           const currentRefreshInterval = ${configRefreshInterval};
           const isRtlDir = ${isRtl};
           const savedSearchQuery = ${JSON.stringify(this._searchQuery)};
@@ -2311,22 +2644,71 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             }
           }
 
+          function toggleGeminiQuota(button) {
+            const content = button.nextElementSibling;
+            if (!content) return;
+            const shouldExpand = button.getAttribute('aria-expanded') !== 'true';
+            button.setAttribute('aria-expanded', String(shouldExpand));
+            content.hidden = !shouldExpand;
+          }
+
           function handleSwitchAccount(btn, email) {
             if (btn.disabled) return;
             btn.disabled = true;
-            const originalText = btn.innerText;
-            btn.innerText = '${i18n.t('webview.activating')}';
+            const originalHtml = btn.innerHTML;
+            btn.textContent = '${i18n.t('webview.activating')}';
             btn.style.opacity = '0.7';
             btn.style.cursor = 'not-allowed';
-            btn.dataset.originalText = originalText;
+            btn.dataset.originalHtml = originalHtml;
             
             sendMessage('switchAccount', email);
           }
 
           // ── Refresh button ──
           let isRefreshing = false;
+          const refreshingAccountEmails = new Set(
+            Array.from(document.querySelectorAll('.account-card.account-refreshing'))
+              .map(card => (card.dataset.email || '').toLowerCase())
+          );
+
+          function getAccountCard(email) {
+            const normalizedEmail = String(email || '').toLowerCase();
+            return Array.from(document.querySelectorAll('.account-card'))
+              .find(card => (card.dataset.email || '').toLowerCase() === normalizedEmail);
+          }
+
+          function syncGlobalRefreshAvailability() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            if (refreshBtn) refreshBtn.disabled = refreshingAccountEmails.size > 0;
+          }
+
+          function setAccountCardRefreshing(email, refreshing) {
+            const normalizedEmail = String(email || '').toLowerCase();
+            const card = getAccountCard(email);
+            if (refreshing) refreshingAccountEmails.add(normalizedEmail);
+            else refreshingAccountEmails.delete(normalizedEmail);
+
+            if (card) {
+              card.classList.toggle('account-refreshing', refreshing);
+              card.setAttribute('aria-busy', refreshing ? 'true' : 'false');
+              card.querySelectorAll('button').forEach(button => {
+                button.disabled = refreshing;
+              });
+            }
+            syncGlobalRefreshAvailability();
+          }
+
+          function handleSingleAccountRefresh(button, email) {
+            const normalizedEmail = String(email || '').toLowerCase();
+            if (isRefreshing || refreshingAccountEmails.has(normalizedEmail) || button.disabled) return;
+            setAccountCardRefreshing(email, true);
+            vscode.postMessage({ command: 'refreshSingleAccount', email });
+          }
+
+          syncGlobalRefreshAvailability();
+
           function handleRefresh() {
-            if (isRefreshing) return;
+            if (isRefreshing || refreshingAccountEmails.size > 0) return;
             const searchInput = document.getElementById('searchInput');
             const query = searchInput ? searchInput.value.trim() : '';
             if (query) {
@@ -2535,10 +2917,19 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
                    c.style.pointerEvents = 'auto';
                 });
              } else if (message.command === 'accountSwitchCancelled') {
-                const btn = document.querySelector('button[onclick*="\\'' + message.email + '\\'"]');
+                const card = getAccountCard(message.email);
+                const btn = card ? card.querySelector('.btn-primary') : null;
                 if (btn) {
                    btn.disabled = false;
-                   btn.innerText = btn.dataset.originalText || '${i18n.t('accounts.activate')}';
+                   if (btn.dataset.originalHtml) {
+                     btn.innerHTML = btn.dataset.originalHtml;
+                     delete btn.dataset.originalHtml;
+                   } else {
+                     const label = btn.querySelector('.btn-responsive-label');
+                     if (label) label.textContent = '${i18n.t('accounts.activate')}';
+                   }
+                   btn.style.opacity = '';
+                   btn.style.cursor = '';
                  }
               }
            });
@@ -2589,6 +2980,15 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             }
           }
 
+          function onHideGeminiBalancesToggle() {
+            const toggle = document.getElementById('hideGeminiBalancesToggle');
+            const slider = document.getElementById('hideGeminiBalancesSlider');
+            const track = document.getElementById('hideGeminiBalancesTrack');
+            slider.style[isRtlDir ? 'right' : 'left'] = toggle.checked ? '20px' : '2px';
+            track.style.background = toggle.checked ? '#4caf50' : 'var(--glass-border)';
+            track.style.boxShadow = toggle.checked ? '0 0 6px rgba(76,175,80,0.4)' : 'none';
+          }
+
           function onIntervalChange() {
             const select = document.getElementById('refreshIntervalSelect');
             if (select.value === '0') {
@@ -2623,11 +3023,15 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             const modal = document.getElementById('settingsModal');
             const select = document.getElementById('preferredModelSelect');
             const helpText = document.getElementById('settingsHelpText');
+            const hideGeminiToggle = document.getElementById('hideGeminiBalancesToggle');
             
-            // Populate preferred model options
-            select.innerHTML = '<option value="">${i18n.t('webview.noSelectionDefault')}</option>';
-            
-            if (!hasAccounts || availableModelKeys.length === 0) {
+            select.value = currentPreferredGroup;
+            if (hideGeminiToggle) {
+              hideGeminiToggle.checked = currentHideGeminiBalances;
+              onHideGeminiBalancesToggle();
+            }
+
+            if (!hasAccounts) {
               select.disabled = true;
               helpText.innerText = "${i18n.t('webview.loginRequired')}";
               helpText.style.color = "var(--vscode-errorForeground)";
@@ -2635,16 +3039,6 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               select.disabled = false;
               helpText.innerText = "${i18n.t('webview.sortExplanation')}";
               helpText.style.color = "";
-              
-              availableModelKeys.forEach(key => {
-                const option = document.createElement('option');
-                option.value = key;
-                option.innerText = key;
-                if (key === currentPreferredModel) {
-                  option.selected = true;
-                }
-                select.appendChild(option);
-              });
             }
             
             // Reset interval dropdown to current value
@@ -2671,6 +3065,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             const selectedLang = langSelect ? langSelect.value : 'auto';
             const autoRefreshToggle = document.getElementById('autoRefreshToggle');
             const autoRefreshEnabled = autoRefreshToggle ? autoRefreshToggle.checked : true;
+            const hideGeminiBalancesToggle = document.getElementById('hideGeminiBalancesToggle');
+            const hideGeminiBalances = hideGeminiBalancesToggle ? hideGeminiBalancesToggle.checked : true;
             const intervalSelect = document.getElementById('refreshIntervalSelect');
             const refreshInterval = intervalSelect ? parseInt(intervalSelect.value) : 15;
             
@@ -2679,6 +3075,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               language: selectedLang,
               preferredModel: selectedModel,
               autoRefreshEnabled: autoRefreshEnabled,
+              hideGeminiBalances: hideGeminiBalances,
               refreshIntervalMinutes: refreshInterval
             });
             closeSettings();
@@ -2705,6 +3102,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             // Toggle refresh button visibility (hide when refreshing)
             const refreshBtn = document.getElementById('refreshBtn');
             if (refreshBtn) refreshBtn.style.display = disabled ? 'none' : 'inline-flex';
+            document.querySelectorAll('.btn-refresh-account').forEach(button => {
+              button.disabled = disabled;
+            });
           }
 
           // ── Progress Banner Management ──
@@ -2771,6 +3171,12 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             } else if (msg.command === 'accountRefreshDone') {
               // No per-card UI updates needed; progress banner is updated on accountRefreshStart
 
+            } else if (msg.command === 'singleAccountRefreshStart') {
+              setAccountCardRefreshing(msg.email, true);
+
+            } else if (msg.command === 'singleAccountRefreshDone') {
+              setAccountCardRefreshing(msg.email, false);
+
             } else if (msg.command === 'refreshFinished') {
               isRefreshing = false;
               setActionsDisabled(false);
@@ -2798,9 +3204,42 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
   // ── Helper Methods for Preferred Model Resolution & Sorting ──
 
-  /**
-   * Applies the exact same filtering/merging pipeline as the UI to extract the final model keys.
-   */
+  /** Resolves legacy model preferences to one of the two supported quota groups. */
+  private async resolvePreferredQuotaGroup(): Promise<QuotaGroupId> {
+    const storedPreference = await this.accountRepo.getPreferredModel();
+    const normalizedPreference = storedPreference?.toLowerCase() || '';
+    const resolved: QuotaGroupId = normalizedPreference === 'gemini' || normalizedPreference.includes('gemini')
+      ? 'gemini'
+      : 'claude-gpt';
+
+    if (storedPreference !== resolved) {
+      await this.accountRepo.setPreferredModel(resolved);
+    }
+    return resolved;
+  }
+
+  private compareAccountsByQuotaGroup(
+    a: AccountSummary,
+    b: AccountSummary,
+    groupId: QuotaGroupId
+  ): number {
+    const aSummary = a.quotaSummary?.length ? a.quotaSummary : deriveQuotaSummaryFromBalances(a.balances);
+    const bSummary = b.quotaSummary?.length ? b.quotaSummary : deriveQuotaSummaryFromBalances(b.balances);
+    const aMetrics = getQuotaSortMetrics(aSummary, groupId);
+    const bMetrics = getQuotaSortMetrics(bSummary, groupId);
+
+    if (aMetrics.effectivePercent !== bMetrics.effectivePercent) {
+      return bMetrics.effectivePercent - aMetrics.effectivePercent;
+    }
+    if (aMetrics.hasFiveHour !== bMetrics.hasFiveHour) {
+      return bMetrics.hasFiveHour ? 1 : -1;
+    }
+    if (aMetrics.weeklyPercent !== bMetrics.weeklyPercent) {
+      return bMetrics.weeklyPercent - aMetrics.weeklyPercent;
+    }
+    return a.email.localeCompare(b.email);
+  }
+
   private extractFilteredModelKeys(balances: Record<string, any> | undefined): string[] {
     if (!balances) return [];
 

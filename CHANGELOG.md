@@ -5,6 +5,18 @@ All notable changes to the "Antigravity Hub" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-08-24
+
+### Full Antigravity IDE Support
+- Updated the extension for full compatibility with Antigravity IDE.
+
+### Added
+- **Per-Account Refresh**: Added the ability to refresh the balance of an individual account.
+- **Gemini Balance Visibility**: Added an option to collapse Gemini balances for users who want to focus on Claude models.
+
+### Changed
+- **Enhanced UI/UX**: Improved visual clarity and usability across the extension.
+
 ## [0.1.6] - 2026-08-23
 
 ### Changed

@@ -18,6 +18,8 @@ import { StateDbService } from './infrastructure/storage/state-db.service';
 import { AccountService } from './features/accounts/account.service';
 import { StatusBarProvider } from './presentation/providers/status-bar.provider';
 import { AccountsWebviewProvider } from './presentation/providers/accounts-webview.provider';
+import { deriveQuotaSummaryFromBalances } from './core/utils/quota-summary.utils';
+import { formatQuotaSummaryCompact, formatQuotaSummaryDetailed } from './core/utils/quota-display.utils';
 
 /**
  * Called when the extension is activated.
@@ -139,13 +141,21 @@ function registerCommands(
 
       const items = accounts.map(a => {
         const isActive = activeEmailLower !== null && a.email.toLowerCase() === activeEmailLower;
-        let creditsStr = '?';
-        if (a.balances && Object.keys(a.balances).length > 0) {
-          creditsStr = Object.values(a.balances).join('/');
-        }
+        const quotaSummary = a.quotaSummary?.length
+          ? a.quotaSummary
+          : deriveQuotaSummaryFromBalances(a.balances);
+        const quotaText = formatQuotaSummaryCompact(
+          quotaSummary,
+          (key, params) => i18n.t(key, params)
+        );
+        const quotaDetail = formatQuotaSummaryDetailed(
+          quotaSummary,
+          (key, params) => i18n.t(key, params)
+        ).replace(/\n/g, '  ');
         return {
           label: `${isActive ? '✅ ' : ''}${a.displayName}`,
-          description: `${creditsStr} Credits`,
+          description: quotaText,
+          detail: quotaDetail,
           email: a.email
         };
       });

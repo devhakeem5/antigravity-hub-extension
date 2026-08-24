@@ -46,11 +46,11 @@ export interface IAccountRepository {
   /** Retrieve the device profile for an account */
   getDeviceProfile(email: string): Promise<DeviceProfile | null>;
 
-  /** Get the user's preferred model key (null = never set, "" = explicitly none) */
+  /** Get the preferred quota group used for account sorting. */
   getPreferredModel(): Promise<string | null>;
 
-  /** Set the user's preferred model key */
-  setPreferredModel(modelKey: string): Promise<void>;
+  /** Set the preferred quota group used for account sorting. */
+  setPreferredModel(groupId: string): Promise<void>;
 
   /** Get the timestamp (ms) of when balances were last globally refreshed */
   getBalancesLastRefreshed(): Promise<number>;

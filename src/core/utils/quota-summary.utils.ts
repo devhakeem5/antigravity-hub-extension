@@ -82,6 +82,27 @@ export function getHighestQuotaPercent(summary: QuotaSummary | undefined): numbe
   return values.length ? Math.max(...values) : undefined;
 }
 
+export interface QuotaSortMetrics {
+  effectivePercent: number;
+  hasFiveHour: boolean;
+  weeklyPercent: number;
+}
+
+/** Returns the values used to rank an account inside one quota group. */
+export function getQuotaSortMetrics(
+  summary: QuotaSummary | undefined,
+  groupId: QuotaGroupId
+): QuotaSortMetrics {
+  const group = (summary || []).find(item => item.id === groupId);
+  const weeklyPercent = group?.weekly?.remainingPercent ?? -1;
+  const hasFiveHour = group?.fiveHour !== undefined;
+  return {
+    effectivePercent: group?.fiveHour?.remainingPercent ?? weeklyPercent,
+    hasFiveHour,
+    weeklyPercent,
+  };
+}
+
 function quotaPercentages(summary: QuotaSummary | undefined): number[] {
   return (summary || []).flatMap(group => [group.weekly, group.fiveHour])
     .filter((window): window is QuotaWindow => !!window)

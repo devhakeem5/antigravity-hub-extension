@@ -411,18 +411,18 @@ export class AccountService {
     email: string,
     callbacks?: {
       onStart?: (email: string) => void;
-      onDone?: (email: string, balances?: Record<string, any>, status?: AccountStatus) => void;
+      onDone?: (email: string, balances?: Record<string, any>, status?: AccountStatus, succeeded?: boolean) => void;
     }
-  ): Promise<void> {
+  ): Promise<boolean> {
     const account = await this.accountRepo.getAccount(email);
-    if (!account) return;
+    if (!account) return false;
 
     callbacks?.onStart?.(email);
 
     let tokens = await this.accountRepo.getTokens(email);
     if (!tokens) {
-      callbacks?.onDone?.(email);
-      return;
+      callbacks?.onDone?.(email, undefined, undefined, false);
+      return false;
     }
 
     const now = Math.floor(Date.now() / 1000);
@@ -437,38 +437,54 @@ export class AccountService {
       } catch (e) {
         Logger.getInstance().warn(`Skipping balance fetch for ${email}: expired token.`);
         await this.accountRepo.updateAccount(email, { status: AccountStatus.TOKEN_EXPIRED });
-        callbacks?.onDone?.(email, undefined, AccountStatus.TOKEN_EXPIRED);
-        return;
+        callbacks?.onDone?.(email, undefined, AccountStatus.TOKEN_EXPIRED, false);
+        return false;
       }
     }
 
     const config = ExtensionConfig.getInstance();
     const balanceInfo = await this.balanceService.getBalanceInfo(tokens.accessToken);
 
-    let status = balanceInfo.hasError ? AccountStatus.ERROR : AccountStatus.ACTIVE;
+    // A failed request must never replace the last known-good cached balance.
+    if (balanceInfo.hasError) {
+      Logger.getInstance().warn(`Balance refresh failed for ${email}; preserving cached balance.`);
+      callbacks?.onDone?.(email, account.balances, account.status, false);
+      return false;
+    }
 
-    if (!balanceInfo.hasError) {
-      const values = Object.values(balanceInfo.balances);
-      const totalCredits = values.reduce((sum: number, val: any) => sum + (typeof val === 'number' ? val : (val?.value || 0)), 0);
+    let status = AccountStatus.ACTIVE;
 
-      if (values.length > 0 && totalCredits <= 0) {
-        status = AccountStatus.DEPLETED;
-      } else if (totalCredits <= config.getLowCreditThreshold()) {
-        status = AccountStatus.LOW_BALANCE;
-      }
+    const values = Object.values(balanceInfo.balances);
+    const totalCredits = values.reduce((sum: number, val: any) => sum + (typeof val === 'number' ? val : (val?.value || 0)), 0);
+    const quotaSummary = balanceInfo.quotaSummary.length > 0
+      ? balanceInfo.quotaSummary
+      : deriveQuotaSummaryFromBalances(balanceInfo.balances);
+    const lowestQuota = getLowestQuotaPercent(quotaSummary);
+    const highestQuota = getHighestQuotaPercent(quotaSummary);
+
+    if (highestQuota !== undefined && highestQuota <= 0) {
+      status = AccountStatus.DEPLETED;
+    } else if (lowestQuota !== undefined && lowestQuota <= 20) {
+      status = AccountStatus.LOW_BALANCE;
+    } else if (lowestQuota === undefined && values.length > 0 && totalCredits <= 0) {
+      status = AccountStatus.DEPLETED;
+    } else if (lowestQuota === undefined && totalCredits <= config.getLowCreditThreshold()) {
+      status = AccountStatus.LOW_BALANCE;
     }
 
     await this.accountRepo.updateAccount(email, {
       balances: balanceInfo.balances,
+      quotaSummary,
       plan: balanceInfo.plan,
       status: status,
       lastRefreshedAt: new Date().toISOString()
     });
 
-    callbacks?.onDone?.(email, balanceInfo.balances, status);
+    callbacks?.onDone?.(email, balanceInfo.balances, status, true);
 
     // Update global refresh timestamp
     await this.accountRepo.setBalancesLastRefreshed(Date.now());
+    return true;
   }
 
   /**

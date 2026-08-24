@@ -182,9 +182,9 @@ export class AccountRepositoryImpl implements IAccountRepository {
     return this.context.globalState.get<string | null>(STORAGE_KEYS.PREFERRED_MODEL, null);
   }
 
-  async setPreferredModel(modelKey: string): Promise<void> {
-    await this.context.globalState.update(STORAGE_KEYS.PREFERRED_MODEL, modelKey);
-    Logger.getInstance().info(`Preferred model set to: ${modelKey || '(none)'}`);
+  async setPreferredModel(groupId: string): Promise<void> {
+    await this.context.globalState.update(STORAGE_KEYS.PREFERRED_MODEL, groupId);
+    Logger.getInstance().info(`Preferred quota group set to: ${groupId}`);
   }
 
   // ── Global Balance Refresh Timestamp ────────────────────────────────────────
