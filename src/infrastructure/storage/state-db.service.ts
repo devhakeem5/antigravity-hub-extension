@@ -37,6 +37,7 @@ export class StateDbService {
     tokens: AccountTokens,
     deviceProfile?: DeviceProfile | null
   ): Promise<'success' | 'cancelled' | 'error'> {
+    const product = PathUtils.getAntigravityProduct();
     const versionCheckResult = this.checkAntigravityVersion();
     if (versionCheckResult === 'unsupported') {
       const i18n = I18nService.getInstance();
@@ -47,7 +48,7 @@ export class StateDbService {
       return 'error';
     }
 
-    const dbPath = PathUtils.getVscdbPath();
+    const dbPath = product.stateDbPath;
     if (!fs.existsSync(dbPath)) {
       const i18n = I18nService.getInstance();
       Logger.getInstance().error(`State database not found at ${dbPath}`);
@@ -58,6 +59,7 @@ export class StateDbService {
     }
 
     try {
+      this.validateTargetPath(product.dataPath, dbPath);
       // ── Step 1: Rolling Backup ──
       this.performRollingBackup(dbPath);
 
@@ -107,7 +109,14 @@ export class StateDbService {
       }
 
       // ── Step 4: Spawn background worker + close window ──
-      const triggered = await this.triggerWorkerAndClose(account.email, dbPath, rows);
+      const triggered = await this.triggerWorkerAndClose(
+        account.email,
+        dbPath,
+        rows,
+        product.executablePath || process.execPath,
+        product.processName,
+        product.displayName
+      );
       return triggered ? 'success' : 'cancelled';
 
     } catch (error: any) {
@@ -125,7 +134,10 @@ export class StateDbService {
   private async triggerWorkerAndClose(
     email: string,
     dbPath: string,
-    rows: Array<{ key: string; value: string | null }>
+    rows: Array<{ key: string; value: string | null }>,
+    executablePath: string,
+    processName: string,
+    productName: string
   ): Promise<boolean> {
     const i18n = I18nService.getInstance();
     const actionYes = i18n.t('switchPrompt.actionYes');
@@ -152,24 +164,18 @@ export class StateDbService {
       await vscode.workspace.saveAll(filesConfig.get<string>('autoSave') === 'off');
     } catch (e) { /* best effort */ }
 
-    const antigravityExe = this.findAntigravityExe();
-    // process.execPath inside Antigravity IS the Antigravity binary itself
-    const currentExePath = process.execPath;
     const workDir = __dirname;
     const payloadPath = path.join(workDir, '.inject-payload.json');
     const workerPath = path.join(workDir, '.inject-worker.js');
 
-    // Collect all candidate exe paths for relaunch (deduplicated)
-    const exeCandidates: string[] = [];
-    if (antigravityExe) exeCandidates.push(antigravityExe);
-    if (currentExePath && !exeCandidates.includes(currentExePath)) exeCandidates.push(currentExePath);
-
-    const payloadObj = { dbPath, rows, exeCandidates };
+    const payloadObj = { dbPath, rows, executablePath, processName, productName };
 
     fs.writeFileSync(payloadPath, JSON.stringify(payloadObj, null, 2), 'utf-8');
     fs.writeFileSync(workerPath, this.getWorkerScript(), 'utf-8');
 
-    Logger.getInstance().info(`Spawning inject-worker. Payload: ${payloadPath}, candidates: ${exeCandidates.join(', ')}`);
+    Logger.getInstance().info(
+      `Spawning inject-worker for ${productName}. DB: ${dbPath}, process: ${processName}, exe: ${executablePath}`
+    );
 
     // CRITICAL: process.execPath inside Antigravity IS the Antigravity.exe (Electron binary).
     // Without ELECTRON_RUN_AS_NODE=1, it will try to open the worker script as a
@@ -224,26 +230,30 @@ if (!payloadPath || !fs.existsSync(payloadPath)) {
 }
 
 const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
-const { dbPath, rows, exeCandidates } = payload;
+const { dbPath, rows, executablePath, processName, productName } = payload;
 const ownPid = process.pid;
 
 log('Worker started. Own PID: ' + ownPid);
 log('DB Path: ' + dbPath);
-log('Exe candidates: ' + JSON.stringify(exeCandidates));
+log('Product: ' + productName);
+log('Process name: ' + processName);
+log('Executable: ' + executablePath);
 log('ELECTRON_RUN_AS_NODE: ' + process.env.ELECTRON_RUN_AS_NODE);
 
-// ── Helper: check if any Antigravity.exe processes are running (excluding self) ──
+// Find processes belonging to the selected product, including names with spaces.
 function getOtherAntigravityPids() {
   try {
-    const out = execSync('tasklist /FI "IMAGENAME eq Antigravity.exe" /FO CSV /NH', {
+    const safeProcessName = String(processName || '').replace(/"/g, '');
+    if (!safeProcessName) return [];
+    const out = execSync('tasklist /FI "IMAGENAME eq ' + safeProcessName + '" /FO CSV /NH', {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     const pids = [];
     for (const line of out.split('\\n')) {
-      const match = line.match(/"Antigravity\\.exe","(\\d+)"/i);
-      if (match) {
-        const pid = parseInt(match[1], 10);
+      const match = line.match(/^"([^"]+)","(\\d+)"/);
+      if (match && match[1].toLowerCase() === safeProcessName.toLowerCase()) {
+        const pid = parseInt(match[2], 10);
         if (pid !== ownPid) pids.push(pid);
       }
     }
@@ -293,36 +303,6 @@ function forceKillRemainingPids() {
   }
 }
 
-// ── Find best exe path to relaunch ──
-function findRelaunchExe() {
-  // Try payload candidates first
-  if (exeCandidates && Array.isArray(exeCandidates)) {
-    for (const candidate of exeCandidates) {
-      if (candidate && fs.existsSync(candidate)) {
-        log('Found relaunch exe from candidates: ' + candidate);
-        return candidate;
-      }
-    }
-  }
-
-  // Fallback: scan common installation paths on Windows
-  const localAppData = process.env.LOCALAPPDATA || '';
-  const programFiles = process.env.PROGRAMFILES || '';
-  const fallbacks = [
-    path.join(localAppData, 'Programs', 'Antigravity', 'Antigravity.exe'),
-    path.join(programFiles, 'Antigravity', 'Antigravity.exe'),
-  ];
-  for (const p of fallbacks) {
-    if (p && fs.existsSync(p)) {
-      log('Found relaunch exe from fallback: ' + p);
-      return p;
-    }
-  }
-
-  log('No relaunch exe found in any candidate or fallback path.');
-  return null;
-}
-
 async function inject() {
   // Phase 1: Wait up to 5s for Antigravity to flush and gracefully exit
   // (The log showed most processes exit within ~2 seconds)
@@ -358,6 +338,10 @@ async function inject() {
   const db = new SQL.Database(buf);
 
   try {
+    const schema = db.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ItemTable'");
+    if (!schema.length || !schema[0].values.length) {
+      throw new Error('ItemTable was not found in the selected state database.');
+    }
     for (const { key, value } of rows) {
       if (value === null) {
         db.run('DELETE FROM ItemTable WHERE key = ?', [key]);
@@ -374,11 +358,28 @@ async function inject() {
     db.close();
   }
 
+  const verificationDb = new SQL.Database(fs.readFileSync(dbPath));
+  try {
+    for (const { key, value } of rows) {
+      const statement = verificationDb.prepare('SELECT value FROM ItemTable WHERE key = ?');
+      statement.bind([key]);
+      const exists = statement.step();
+      const actual = exists ? statement.get()[0] : undefined;
+      statement.free();
+      if (value === null ? exists : actual !== value) {
+        throw new Error('Post-write verification failed for key: ' + key);
+      }
+    }
+    log('Post-write verification succeeded for ' + rows.length + ' keys.');
+  } finally {
+    verificationDb.close();
+  }
+
   // Cleanup payload file
   try { fs.unlinkSync(payloadPath); } catch {}
 
   // ── Relaunch Antigravity ──
-  const relaunchExe = findRelaunchExe();
+  const relaunchExe = executablePath && fs.existsSync(executablePath) ? executablePath : null;
   if (relaunchExe) {
     log('Relaunching Antigravity: ' + relaunchExe);
 
@@ -422,17 +423,6 @@ inject().catch((err) => {
   process.exit(1);
 });
 `;
-  }
-
-  private findAntigravityExe(): string | undefined {
-    if (process.platform === 'win32') {
-      const candidates = [
-        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Antigravity', 'Antigravity.exe'),
-        path.join(process.env.PROGRAMFILES || '', 'Antigravity', 'Antigravity.exe'),
-      ];
-      return candidates.find(c => fs.existsSync(c));
-    }
-    return undefined;
   }
 
   // ─── Read Current Active Account from state.vscdb ──────────────────────────
@@ -592,6 +582,14 @@ inject().catch((err) => {
     }
     Logger.getInstance().info(`Detected Antigravity version: ${version.short}`);
     return isVersionSupported(version) ? 'supported' : 'unsupported';
+  }
+
+  private validateTargetPath(dataPath: string, dbPath: string): void {
+    const dataRoot = path.resolve(dataPath).toLowerCase() + path.sep;
+    const database = path.resolve(dbPath).toLowerCase();
+    if (!database.startsWith(dataRoot)) {
+      throw new Error('The state database does not belong to the detected Antigravity product.');
+    }
   }
 
   private writeDeviceProfileToStorageJson(profile: DeviceProfile): void {

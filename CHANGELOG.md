@@ -5,11 +5,22 @@ All notable changes to the "Antigravity Hub" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-08-23
+
+### Changed
+- **Unified Quota Display**: Grouped Gemini and Claude/GPT limits into weekly and optional five-hour balances with renewal times.
+
+## [0.1.5] - 2026-08-23
+
+### Fixed
+- **Antigravity IDE Compatibility**: Restored account switching after the editor's executable and data directory were renamed.
+
 ## [0.1.4] - 2026-05-13
 
 ### Improved
 - **Settings Panel**: Improved auto-refresh controls - clearer toggle states and preset interval options.
 - **Refresh UX**: Replaced per-card loading indicators with a unified progress banner showing completion percentage and current account.
+- **Security**: Enhanced ban protection by implementing randomized delays between sequential account balance requests.
 ## [0.1.3] - 2026-05-13
 
 ### Added

@@ -5,8 +5,8 @@
  * Ensures the extension works identically on Windows, macOS, and Linux.
  */
 
-import * as os from 'os';
 import * as path from 'path';
+import { AntigravityProduct, detectAntigravityProduct } from './antigravity-product.utils';
 
 export class PathUtils {
   /**
@@ -16,33 +16,18 @@ export class PathUtils {
    * - Linux: ~/.config/Antigravity
    */
   static getAntigravityDataPath(): string {
-    const platform = os.platform();
-    const homeDir = os.homedir();
+    return this.getAntigravityProduct().dataPath;
+  }
 
-    switch (platform) {
-      case 'win32':
-        // Fallback to constructed path if APPDATA is somehow missing
-        const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
-        return path.join(appData, 'Antigravity');
-      
-      case 'darwin':
-        return path.join(homeDir, 'Library', 'Application Support', 'Antigravity');
-      
-      case 'linux':
-        // Respect XDG_CONFIG_HOME if set, otherwise default to ~/.config
-        const configHome = process.env.XDG_CONFIG_HOME || path.join(homeDir, '.config');
-        return path.join(configHome, 'Antigravity');
-        
-      default:
-        throw new Error(`Unsupported operating system: ${platform}`);
-    }
+  static getAntigravityProduct(): AntigravityProduct {
+    return detectAntigravityProduct();
   }
 
   /**
    * Gets the path to the SQLite state database where Antigravity stores OAuth tokens.
    */
   static getVscdbPath(): string {
-    return path.join(this.getAntigravityDataPath(), 'User', 'globalStorage', 'state.vscdb');
+    return this.getAntigravityProduct().stateDbPath;
   }
 
   /**
@@ -60,6 +45,6 @@ export class PathUtils {
    * This file sits alongside state.vscdb in the globalStorage directory.
    */
   static getStorageJsonPath(): string {
-    return path.join(this.getAntigravityDataPath(), 'storage.json');
+    return this.getAntigravityProduct().storageJsonPath;
   }
 }

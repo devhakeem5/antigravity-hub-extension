@@ -143,6 +143,7 @@ export class AccountRepositoryImpl implements IAccountRepository {
       displayName: a.alias || a.name || a.email,
       avatarUrl: a.avatarUrl,
       balances: a.balances,
+      quotaSummary: a.quotaSummary,
       status: a.status,
       isActive: a.isActive
     }));

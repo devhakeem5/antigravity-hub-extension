@@ -14,6 +14,7 @@ import { Logger } from '../../core/utils/logger';
 import { I18nService } from '../../i18n/i18n.service';
 import { AccountStatus } from '../../core/domain/models/account.model';
 import { ExtensionConfig } from '../../core/config/extension.config';
+import { deriveQuotaSummaryFromBalances, getHighestQuotaPercent, getLowestQuotaPercent } from '../../core/utils/quota-summary.utils';
 import { generateDeviceProfile } from '../../core/domain/models/device-profile.model';
 
 export class AccountService {
@@ -77,18 +78,21 @@ export class AccountService {
         const config = ExtensionConfig.getInstance();
         let finalStatus = balanceInfo.hasError ? AccountStatus.ERROR : AccountStatus.ACTIVE;
         
-        let totalCredits = 0;
         if (!balanceInfo.hasError) {
           const values = Object.values(balanceInfo.balances);
-          totalCredits = values.reduce((sum, val) => sum + (typeof val === 'number' ? val : (val?.value || 0)), 0);
-
-          if (values.length > 0 && totalCredits <= 0) finalStatus = AccountStatus.DEPLETED;
-          else if (totalCredits <= config.getLowCreditThreshold()) finalStatus = AccountStatus.LOW_BALANCE;
+          const totalCredits = values.reduce((sum, val) => sum + (typeof val === 'number' ? val : (val?.value || 0)), 0);
+          const lowestQuota = getLowestQuotaPercent(balanceInfo.quotaSummary);
+          const highestQuota = getHighestQuotaPercent(balanceInfo.quotaSummary);
+          if (highestQuota !== undefined && highestQuota <= 0) finalStatus = AccountStatus.DEPLETED;
+          else if (lowestQuota !== undefined && lowestQuota <= 20) finalStatus = AccountStatus.LOW_BALANCE;
+          else if (lowestQuota === undefined && values.length > 0 && totalCredits <= 0) finalStatus = AccountStatus.DEPLETED;
+          else if (lowestQuota === undefined && totalCredits <= config.getLowCreditThreshold()) finalStatus = AccountStatus.LOW_BALANCE;
         }
 
         // 4. Update dynamic properties (balances, plan)
         await this.accountRepo.updateAccount(profile.email, {
           balances: balanceInfo.balances,
+          quotaSummary: balanceInfo.quotaSummary,
           plan: balanceInfo.plan,
           status: finalStatus,
           lastRefreshedAt: new Date().toISOString()
@@ -343,10 +347,19 @@ export class AccountService {
       if (!balanceInfo.hasError) {
         const values = Object.values(balanceInfo.balances);
         const totalCredits = values.reduce((sum: number, val: any) => sum + (typeof val === 'number' ? val : (val?.value || 0)), 0);
+        const quotaSummary = balanceInfo.quotaSummary.length > 0
+          ? balanceInfo.quotaSummary
+          : deriveQuotaSummaryFromBalances(balanceInfo.balances);
+        const lowestQuota = getLowestQuotaPercent(quotaSummary);
+        const highestQuota = getHighestQuotaPercent(quotaSummary);
 
-        if (values.length > 0 && totalCredits <= 0) {
+        if (highestQuota !== undefined && highestQuota <= 0) {
           status = AccountStatus.DEPLETED;
-        } else if (totalCredits <= config.getLowCreditThreshold()) {
+        } else if (lowestQuota !== undefined && lowestQuota <= 20) {
+          status = AccountStatus.LOW_BALANCE;
+        } else if (lowestQuota === undefined && values.length > 0 && totalCredits <= 0) {
+          status = AccountStatus.DEPLETED;
+        } else if (lowestQuota === undefined && totalCredits <= config.getLowCreditThreshold()) {
           status = AccountStatus.LOW_BALANCE;
         }
         successCount++;
@@ -354,6 +367,7 @@ export class AccountService {
 
       await this.accountRepo.updateAccount(account.email, {
         balances: balanceInfo.balances,
+        quotaSummary: balanceInfo.quotaSummary,
         plan: balanceInfo.plan,
         status: status,
         lastRefreshedAt: new Date().toISOString()

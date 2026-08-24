@@ -11,11 +11,14 @@ import { ApiClient } from '../../core/network/api.client';
 import { API } from '../../core/constants/app.constants';
 import { Logger } from '../../core/utils/logger';
 import { AccountPlan } from '../../core/domain/models/account.model';
+import { QuotaSummary } from '../../core/domain/models/quota-summary.model';
+import { deriveQuotaSummaryFromBalances, parseQuotaSummaryResponse } from '../../core/utils/quota-summary.utils';
 
 export interface BalanceResult {
   balances: Record<string, any>;
   plan: AccountPlan;
   projectId?: string;
+  quotaSummary: QuotaSummary;
   hasError: boolean;
 }
 
@@ -28,6 +31,7 @@ export class BalanceService {
     const result: BalanceResult = {
       balances: {},
       plan: AccountPlan.UNKNOWN,
+      quotaSummary: [],
       hasError: false
     };
 
@@ -67,6 +71,12 @@ export class BalanceService {
       const modelBalances = await this.tryFetchAvailableModels(accessToken, result.projectId);
       if (Object.keys(modelBalances).length > 0) {
         result.balances = { ...result.balances, ...modelBalances };
+      }
+
+      // Strategy 5: Google's unified quota groups (weekly and optional five-hour windows)
+      result.quotaSummary = await this.tryRetrieveQuotaSummary(accessToken, result.projectId);
+      if (result.quotaSummary.length === 0) {
+        result.quotaSummary = deriveQuotaSummaryFromBalances(result.balances);
       }
 
       // Final Check
@@ -166,6 +176,24 @@ export class BalanceService {
     }
     
     return balances;
+  }
+
+  private async tryRetrieveQuotaSummary(accessToken: string, projectId?: string): Promise<QuotaSummary> {
+    const body = projectId ? { project: projectId } : {};
+    for (const url of API.QUOTA_SUMMARY_URLS) {
+      try {
+        Logger.getInstance().debug(`Attempting retrieveUserQuotaSummary at ${url}...`);
+        const data = await ApiClient.request<unknown>(url, { method: 'POST', body, accessToken });
+        const summary = parseQuotaSummaryResponse(data);
+        if (summary.length > 0) {
+          Logger.getInstance().info(`Successfully fetched ${summary.length} unified quota groups from ${url}`);
+          return summary;
+        }
+      } catch {
+        Logger.getInstance().debug(`Failed to retrieve unified quota summary from ${url}`);
+      }
+    }
+    return [];
   }
 
   /**

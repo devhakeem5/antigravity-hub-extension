@@ -8,10 +8,10 @@
  */
 
 import * as os from 'os';
-import * as path from 'path';
 import * as fs from 'fs';
 import { execSync } from 'child_process';
 import { Logger } from '../utils/logger';
+import { detectAntigravityProduct } from './antigravity-product.utils';
 
 export const MIN_SUPPORTED_VERSION = '1.16.5';
 
@@ -62,8 +62,12 @@ function compareVersions(a: string, b: string): number {
   for (let i = 0; i < maxLen; i++) {
     const numA = partsA[i] || 0;
     const numB = partsB[i] || 0;
-    if (numA > numB) return 1;
-    if (numA < numB) return -1;
+    if (numA > numB) {
+      return 1;
+    }
+    if (numA < numB) {
+      return -1;
+    }
   }
   return 0;
 }
@@ -71,11 +75,8 @@ function compareVersions(a: string, b: string): number {
 // ─── Platform-Specific Detection ────────────────────────────────────────────
 
 function detectVersionWindows(): AntigravityVersion | null {
-  // Try to find Antigravity executable and read its FileVersion via PowerShell
-  const possiblePaths = [
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Antigravity', 'Antigravity.exe'),
-    path.join(process.env.PROGRAMFILES || '', 'Antigravity', 'Antigravity.exe'),
-  ];
+  const executablePath = detectAntigravityProduct().executablePath;
+  const possiblePaths = executablePath ? [executablePath] : [];
 
   for (const exePath of possiblePaths) {
     if (fs.existsSync(exePath)) {

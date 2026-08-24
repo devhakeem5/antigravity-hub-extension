@@ -38,6 +38,10 @@ export const API = {
     'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
     'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
   ],
+  QUOTA_SUMMARY_URLS: [
+    'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+    'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+  ],
   DEFAULT_VERSION: '1.22.2',
 } as const;
 

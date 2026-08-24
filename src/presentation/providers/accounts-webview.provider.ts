@@ -17,6 +17,8 @@ import { Account, AccountTokens, AccountStatus } from '../../core/domain/models/
 import { DeviceProfile } from '../../core/domain/models/device-profile.model';
 import { CryptoUtils } from '../../core/utils/crypto.utils';
 import { ExtensionConfig } from '../../core/config/extension.config';
+import { QuotaGroup, QuotaWindow } from '../../core/domain/models/quota-summary.model';
+import { deriveQuotaSummaryFromBalances } from '../../core/utils/quota-summary.utils';
 
 /** Shape of an individual account inside the backup */
 interface ExportedAccount {
@@ -813,6 +815,48 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
        return i18n.t('webview.renewsInHoursMins', { hours: totalHours, mins });
     };
 
+    const quotaColorClass = (value: number): string => {
+      if (value < 32) return 'bg-low';
+      if (value < 60) return 'bg-med';
+      return 'bg-high';
+    };
+
+    const renderQuotaWindow = (window: QuotaWindow, title: string): string => {
+      const exhausted = window.remainingPercent <= 0;
+      const colorClass = quotaColorClass(window.remainingPercent);
+      const valueHtml = exhausted
+        ? `<span class="quota-renewal ${window.resetTime ? '' : 'quota-renewal-unknown'}">${window.resetTime
+          ? formatTime(window.resetTime)
+          : i18n.t('webview.limitReached')}</span>`
+        : `<span class="quota-percentage ${colorClass}-text">${window.remainingPercent}%</span>`;
+
+      return `
+        <div class="quota-window ${exhausted ? 'is-exhausted' : ''}">
+          <div class="quota-window-header">
+            <span class="quota-window-title">${title}</span>
+            ${valueHtml}
+          </div>
+          <div class="progress-bar-container" role="progressbar" aria-label="${title}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${window.remainingPercent}">
+            <div class="progress-bar ${colorClass}" style="width: ${window.remainingPercent}%"></div>
+          </div>
+        </div>`;
+    };
+
+    const renderQuotaGroup = (group: QuotaGroup): string => {
+      const title = group.id === 'gemini'
+        ? i18n.t('webview.geminiModels')
+        : i18n.t('webview.claudeGptModels');
+      const windows = [
+        group.weekly ? renderQuotaWindow(group.weekly, i18n.t('webview.weeklyLimitRemaining')) : '',
+        group.fiveHour ? renderQuotaWindow(group.fiveHour, i18n.t('webview.fiveHourLimitRemaining')) : '',
+      ].filter(Boolean).join('');
+      return windows ? `
+        <section class="quota-group" aria-label="${title}">
+          <h5 class="quota-group-title">${title}</h5>
+          <div class="quota-windows">${windows}</div>
+        </section>` : '';
+    };
+
     // Generate HTML for each account card
     const accountCardsHtml = accounts.length > 0 ? accounts.map(acc => {
       // Process balances according to display rules
@@ -1092,19 +1136,16 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         </div>
       ` : '';
 
-      // Build card body: models section only for non-expired accounts
+      const quotaSummary = acc.quotaSummary && acc.quotaSummary.length > 0
+        ? acc.quotaSummary
+        : deriveQuotaSummaryFromBalances(acc.balances);
+      const quotaHtml = quotaSummary.map(renderQuotaGroup).filter(Boolean).join('')
+        || `<div class="empty-models">${i18n.t('webview.noQuotaData')}</div>`;
+
+      // Build card body: unified quota groups only for non-expired accounts
       const cardBody = isExpired ? expiredBannerHtml : `
-          ${creditsHtml}
-          
-          <div class="models-section">
-            ${collapseHeaderHtml}
-            <div class="collapsible-wrapper" id="${wrapperId}">
-              <div class="collapsible-inner">
-                <div class="models-container">
-                  ${modelsHtml}
-                </div>
-              </div>
-            </div>
+          <div class="quota-summary">
+            ${quotaHtml}
           </div>
       `;
 
@@ -1379,6 +1420,86 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             margin-bottom: 16px;
           }
 
+          .quota-summary {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-bottom: 16px;
+          }
+
+          .quota-group {
+            min-width: 0;
+          }
+
+          .quota-group-title {
+            margin: 0 0 8px;
+            color: var(--text-primary);
+            font-size: 0.82rem;
+            font-weight: 700;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+          }
+
+          .quota-windows {
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+            padding: 10px 12px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+          }
+
+          .quota-window {
+            min-width: 0;
+          }
+
+          .quota-window + .quota-window {
+            padding-top: 9px;
+            border-top: 1px solid var(--glass-border);
+          }
+
+          .quota-window-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 7px;
+            min-width: 0;
+          }
+
+          .quota-window-title {
+            min-width: 0;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            font-weight: 600;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+          }
+
+          .quota-percentage {
+            flex-shrink: 0;
+            font-size: 0.8rem;
+            font-weight: 750;
+          }
+
+          .quota-renewal {
+            color: var(--danger-color);
+            font-size: 0.72rem;
+            font-weight: 650;
+            line-height: 1.35;
+            text-align: end;
+            overflow-wrap: anywhere;
+          }
+
+          .quota-renewal-unknown {
+            color: var(--text-secondary);
+          }
+
+          .quota-window.is-exhausted .progress-bar-container {
+            opacity: 0.65;
+          }
+
           .collapse-header {
             display: flex;
             align-items: center;
@@ -1571,7 +1692,6 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           .progress-bar {
             height: 100%;
             border-radius: 3px;
-            transition: width 0.4s ease;
           }
 
           .bg-high { background: var(--success-color); }
@@ -1709,6 +1829,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             .model-name { font-size: 0.78rem; }
             .model-reset { font-size: 0.65rem; }
             .model-percentage { font-size: 0.7rem; }
+            .quota-windows { padding: 9px 10px; }
+            .quota-window-header { align-items: flex-start; flex-direction: column; gap: 3px; }
+            .quota-renewal { text-align: start; }
             .btn { padding: 5px 10px; font-size: 0.75rem; }
             .header-actions h2 { font-size: 0.95rem; }
             .btn-icon { padding: 4px 8px; font-size: 0.8rem; }
@@ -1868,7 +1991,6 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             height: 100%;
             border-radius: 3px;
             background: var(--primary-color);
-            transition: width 0.4s ease;
             width: 0%;
           }
 

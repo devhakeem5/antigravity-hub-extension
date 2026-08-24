@@ -1,3 +1,5 @@
+import { QuotaSummary } from './quota-summary.model';
+
 /**
  * Account Entity — Core domain model
  *
@@ -48,6 +50,9 @@ export interface Account {
   /** Map of model names to their remaining credits/quotas */
   balances: Record<string, any>;
 
+  /** Unified quota groups and time windows returned by Antigravity. */
+  quotaSummary?: QuotaSummary;
+
   /** Maximum credits for the plan (if known) */
   maxCredits?: number;
 
@@ -90,6 +95,7 @@ export interface AccountSummary {
   displayName: string; // alias || name || email
   avatarUrl?: string;
   balances?: Record<string, any>;
+  quotaSummary?: QuotaSummary;
   status: AccountStatus;
   isActive: boolean;
 }
