@@ -62,17 +62,36 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
    */
   private _pinnedActiveEmail: string | null = null;
 
+  /** Sets the pinned email and persists it to globalState for survival across extension host restarts. */
+  private setPinnedActiveEmail(email: string | null): void {
+    this._pinnedActiveEmail = email;
+    if (this.extensionContext) {
+      this.extensionContext.globalState.update(AccountsWebviewProvider.PINNED_EMAIL_KEY, email ?? undefined);
+    }
+  }
+
   /** Current search query preserved across webview re-renders */
   private _searchQuery: string = '';
 
   /** Accounts currently being refreshed from their own card controls. */
   private readonly _singleAccountRefreshes = new Set<string>();
 
+  private static readonly PINNED_EMAIL_KEY = 'antigravityHub.pinnedActiveEmail';
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly accountRepo: IAccountRepository,
-    private readonly accountService: AccountService
+    private readonly accountService: AccountService,
+    private readonly extensionContext?: vscode.ExtensionContext
   ) {
+    // Restore pinned email from globalState (survives extension host restarts)
+    if (extensionContext) {
+      const saved = extensionContext.globalState.get<string>(AccountsWebviewProvider.PINNED_EMAIL_KEY);
+      if (saved) {
+        this._pinnedActiveEmail = saved;
+      }
+    }
+
     // Automatically re-detect active account and re-render when data changes
     this.accountService.onAccountsChanged(() => {
       this.detectAndPinActiveAccount().then(() => this.refresh());
@@ -109,6 +128,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               i18n.t('common.yes'), i18n.t('common.cancel')
             );
             if (confirm === i18n.t('common.yes')) {
+              // Pin the account immediately so the UI reflects the switch
+              this.setPinnedActiveEmail(message.email.toLowerCase());
               await this.accountService.switchAccountWorkflow(message.email);
             } else {
               this._view?.webview.postMessage({ command: 'accountSwitchCancelled', email: message.email });
@@ -167,6 +188,9 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           }
           if (message.hideGeminiBalances !== undefined) {
             await vscode.workspace.getConfiguration('antigravityHub').update('hideGeminiBalances', message.hideGeminiBalances, vscode.ConfigurationTarget.Global);
+          }
+          if (message.showGemini4Limit !== undefined) {
+            await vscode.workspace.getConfiguration('antigravityHub').update('showGemini4Limit', message.showGemini4Limit, vscode.ConfigurationTarget.Global);
           }
           if (message.refreshIntervalMinutes !== undefined) {
             await vscode.workspace.getConfiguration('antigravityHub').update('refreshIntervalMinutes', message.refreshIntervalMinutes, vscode.ConfigurationTarget.Global);
@@ -259,7 +283,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     // Step 1: Check if the account list is empty
     const accounts = await this.accountRepo.getAllAccounts();
     if (accounts.length === 0) {
-      this._pinnedActiveEmail = null;
+      this.setPinnedActiveEmail(null);
       return;
     }
 
@@ -274,7 +298,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
     // Step 3: If no account (Antigravity is logged out) → clear pin and stop
     if (!activeEmail) {
-      this._pinnedActiveEmail = null;
+      this.setPinnedActiveEmail(null);
       return;
     }
 
@@ -284,11 +308,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
 
     if (matchFound) {
       // Step 5: Pin this account — it will be moved to the top of the list
-      this._pinnedActiveEmail = activeEmailLower;
+      this.setPinnedActiveEmail(activeEmailLower);
       Logger.getInstance().info(`Pinned active account: ${activeEmail}`);
     } else {
       // Step 6: Email not in our list — clear pin
-      this._pinnedActiveEmail = null;
+      this.setPinnedActiveEmail(null);
       Logger.getInstance().info(`Active Antigravity email "${activeEmail}" does not match any stored account.`);
     }
   }
@@ -808,6 +832,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const configLanguage = vscode.workspace.getConfiguration('antigravityHub').get<string>('language', 'auto');
     const configAutoRefresh = vscode.workspace.getConfiguration('antigravityHub').get<boolean>('autoRefreshEnabled', true);
     const configHideGeminiBalances = vscode.workspace.getConfiguration('antigravityHub').get<boolean>('hideGeminiBalances', true);
+    const configShowGemini4Limit = vscode.workspace.getConfiguration('antigravityHub').get<boolean>('showGemini4Limit', true);
     const configRefreshInterval = vscode.workspace.getConfiguration('antigravityHub').get<number>('refreshIntervalMinutes', 15);
     const accounts = await this.accountRepo.getAccountSummaries();
 
@@ -889,8 +914,10 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const renderQuotaGroup = (group: QuotaGroup): string => {
       const title = group.id === 'gemini'
         ? i18n.t('webview.geminiModels')
-        : i18n.t('webview.claudeGptModels');
-      const groupIconUri = group.id === 'gemini' ? geminiIconUri : claudeIconUri;
+        : group.id === 'gemini-4'
+          ? i18n.t('webview.gemini4Models')
+          : i18n.t('webview.claudeGptModels');
+      const groupIconUri = group.id === 'claude-gpt' ? claudeIconUri : geminiIconUri;
       const groupIcon = `<img src="${groupIconUri}" alt="" aria-hidden="true" />`;
       const windows = [
         group.weekly ? renderQuotaWindow(group.weekly, i18n.t('webview.weeklyLimitRemaining')) : '',
@@ -1211,12 +1238,19 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
       const quotaSummary = acc.quotaSummary && acc.quotaSummary.length > 0
         ? acc.quotaSummary
         : deriveQuotaSummaryFromBalances(acc.balances);
+
+      // Filter out gemini-4 if the setting is disabled
+      const filteredQuotaGroups = quotaSummary.filter(group =>
+        group.id !== 'gemini-4' || configShowGemini4Limit
+      );
+
       const orderedQuotaGroups = configHideGeminiBalances
         ? [
-          ...quotaSummary.filter(group => group.id === 'claude-gpt'),
-          ...quotaSummary.filter(group => group.id === 'gemini'),
+          ...filteredQuotaGroups.filter(group => group.id === 'claude-gpt'),
+          ...filteredQuotaGroups.filter(group => group.id === 'gemini-4'),
+          ...filteredQuotaGroups.filter(group => group.id === 'gemini'),
         ]
-        : quotaSummary;
+        : filteredQuotaGroups;
       const quotaHtml = orderedQuotaGroups.map(group =>
         configHideGeminiBalances && group.id === 'gemini'
           ? renderCollapsedGeminiGroup(group)
@@ -2581,6 +2615,18 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               <p style="font-size:0.82em; opacity:0.65; margin:0; line-height:1.5;">${i18n.t('webview.hideGeminiBalancesDescription')}</p>
             </div>
 
+            <div style="border-top:1px solid var(--border-color); padding-top:16px; margin-bottom:16px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:8px;">
+                <label for="showGemini4LimitToggle" style="font-weight:bold; cursor:pointer; line-height:1.4;">${i18n.t('webview.showGemini4LimitLabel')}</label>
+                <label style="position:relative; display:inline-block; flex:0 0 auto; width:40px; height:22px; cursor:pointer;">
+                  <input type="checkbox" id="showGemini4LimitToggle" ${configShowGemini4Limit ? 'checked' : ''} onchange="onShowGemini4LimitToggle()" style="opacity:0; width:0; height:0;">
+                  <span id="showGemini4LimitTrack" style="position:absolute; inset:0; background:${configShowGemini4Limit ? '#4caf50' : 'var(--glass-border)'}; border-radius:11px; transition:background 0.3s, box-shadow 0.3s; ${configShowGemini4Limit ? 'box-shadow:0 0 6px rgba(76,175,80,0.4);' : ''}"></span>
+                  <span id="showGemini4LimitSlider" style="position:absolute; top:2px; ${isRtl ? 'right' : 'left'}:2px; width:18px; height:18px; background:var(--text-primary); border-radius:50%; transition:0.3s; ${configShowGemini4Limit ? (isRtl ? 'right:20px' : 'left:20px') : ''}"></span>
+                </label>
+              </div>
+              <p style="font-size:0.82em; opacity:0.65; margin:0; line-height:1.5;">${i18n.t('webview.showGemini4LimitDescription')}</p>
+            </div>
+
             <div style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-bottom: 16px;">
               <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
                 <label for="autoRefreshToggle" style="font-weight:bold; cursor:pointer;">${i18n.t('webview.autoRefreshLabel')}</label>
@@ -2630,6 +2676,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
           const hasAccounts = ${accounts.length > 0};
           const currentAutoRefresh = ${configAutoRefresh};
           const currentHideGeminiBalances = ${configHideGeminiBalances};
+          const currentShowGemini4Limit = ${configShowGemini4Limit};
           const currentRefreshInterval = ${configRefreshInterval};
           const isRtlDir = ${isRtl};
           const savedSearchQuery = ${JSON.stringify(this._searchQuery)};
@@ -2994,6 +3041,15 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             track.style.boxShadow = toggle.checked ? '0 0 6px rgba(76,175,80,0.4)' : 'none';
           }
 
+          function onShowGemini4LimitToggle() {
+            const toggle = document.getElementById('showGemini4LimitToggle');
+            const slider = document.getElementById('showGemini4LimitSlider');
+            const track = document.getElementById('showGemini4LimitTrack');
+            slider.style[isRtlDir ? 'right' : 'left'] = toggle.checked ? '20px' : '2px';
+            track.style.background = toggle.checked ? '#4caf50' : 'var(--glass-border)';
+            track.style.boxShadow = toggle.checked ? '0 0 6px rgba(76,175,80,0.4)' : 'none';
+          }
+
           function onIntervalChange() {
             const select = document.getElementById('refreshIntervalSelect');
             if (select.value === '0') {
@@ -3035,6 +3091,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               hideGeminiToggle.checked = currentHideGeminiBalances;
               onHideGeminiBalancesToggle();
             }
+            const showGemini4Toggle = document.getElementById('showGemini4LimitToggle');
+            if (showGemini4Toggle) {
+              showGemini4Toggle.checked = currentShowGemini4Limit;
+              onShowGemini4LimitToggle();
+            }
 
             if (!hasAccounts) {
               select.disabled = true;
@@ -3072,6 +3133,8 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             const autoRefreshEnabled = autoRefreshToggle ? autoRefreshToggle.checked : true;
             const hideGeminiBalancesToggle = document.getElementById('hideGeminiBalancesToggle');
             const hideGeminiBalances = hideGeminiBalancesToggle ? hideGeminiBalancesToggle.checked : true;
+            const showGemini4LimitToggle = document.getElementById('showGemini4LimitToggle');
+            const showGemini4Limit = showGemini4LimitToggle ? showGemini4LimitToggle.checked : true;
             const intervalSelect = document.getElementById('refreshIntervalSelect');
             const refreshInterval = intervalSelect ? parseInt(intervalSelect.value) : 15;
             
@@ -3081,6 +3144,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
               preferredModel: selectedModel,
               autoRefreshEnabled: autoRefreshEnabled,
               hideGeminiBalances: hideGeminiBalances,
+              showGemini4Limit: showGemini4Limit,
               refreshIntervalMinutes: refreshInterval
             });
             closeSettings();
@@ -3233,14 +3297,23 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const aMetrics = getQuotaSortMetrics(aSummary, groupId);
     const bMetrics = getQuotaSortMetrics(bSummary, groupId);
 
+    // Step 1: Sort by effective percent (5h if available, else weekly) — higher is better
     if (aMetrics.effectivePercent !== bMetrics.effectivePercent) {
       return bMetrics.effectivePercent - aMetrics.effectivePercent;
     }
-    if (aMetrics.hasFiveHour !== bMetrics.hasFiveHour) {
-      return bMetrics.hasFiveHour ? 1 : -1;
-    }
+    // Step 2: If effective percent is tied, sort by weekly percent — higher is better
     if (aMetrics.weeklyPercent !== bMetrics.weeklyPercent) {
       return bMetrics.weeklyPercent - aMetrics.weeklyPercent;
+    }
+    // Step 3: If weekly is also tied AND both exhausted, sort by weekly renewal time — sooner is better
+    if (aMetrics.weeklyPercent <= 0 && bMetrics.weeklyPercent <= 0) {
+      if (aMetrics.weeklyResetMs !== bMetrics.weeklyResetMs) {
+        return aMetrics.weeklyResetMs - bMetrics.weeklyResetMs;
+      }
+    }
+    // Step 4: Tie-break by five-hour availability
+    if (aMetrics.hasFiveHour !== bMetrics.hasFiveHour) {
+      return bMetrics.hasFiveHour ? 1 : -1;
     }
     return a.email.localeCompare(b.email);
   }

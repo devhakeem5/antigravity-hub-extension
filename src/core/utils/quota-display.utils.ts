@@ -8,7 +8,9 @@ export function formatQuotaSummaryCompact(summary: QuotaSummary, t: Translate): 
   return summary.map(group => {
     const groupName = group.id === 'gemini'
       ? t('statusBar.geminiShort')
-      : t('statusBar.claudeGptShort');
+      : group.id === 'gemini-4'
+        ? t('statusBar.gemini4Short')
+        : t('statusBar.claudeGptShort');
     const limits: string[] = [];
     if (group.weekly) {
       limits.push(`${t('statusBar.weeklyShort')} ${formatQuotaWindowValue(group.weekly, t)}`);
@@ -26,7 +28,9 @@ export function formatQuotaSummaryDetailed(summary: QuotaSummary, t: Translate):
   return summary.map(group => {
     const title = group.id === 'gemini'
       ? t('webview.geminiModels')
-      : t('webview.claudeGptModels');
+      : group.id === 'gemini-4'
+        ? t('webview.gemini4Models')
+        : t('webview.claudeGptModels');
     const lines = [title];
     if (group.weekly) {
       lines.push(`  ${t('webview.weeklyLimitRemaining')}: ${formatQuotaWindowValue(group.weekly, t)}`);

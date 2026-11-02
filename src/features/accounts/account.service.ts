@@ -176,7 +176,8 @@ export class AccountService {
     }
 
     // Inject into Database (tokens + device profile + telemetry)
-    const result = await this.stateDbService.injectAccountState(account, tokens, deviceProfile);
+    // Use live injection (restarts extension host only, no window reload)
+    const result = await this.stateDbService.injectAccountStateLive(account, tokens, deviceProfile);
     
     if (result === 'success') {
       // We no longer save the active account in the local DB.

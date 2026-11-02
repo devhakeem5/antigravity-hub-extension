@@ -11,6 +11,15 @@
  *   2. Close the Antigravity window (which triggers its flush)
  *   3. The worker waits for the file to stabilize, then overwrites it
  *   4. Antigravity relaunches and reads the new data
+ *
+ * NEW ANTIGRAVITY IDE (agent hub architecture):
+ *   The AI agent now runs in a separate backend process (`agy.exe --hub`) that
+ *   loads its OAuth token from the OS keyring (Credential Manager entry
+ *   "gemini:antigravity") instead of state.vscdb. Injecting state.vscdb alone
+ *   therefore left the agent on the OLD account. The worker now also:
+ *     - stops the hub processes spawned by the closing IDE (they cache + re-save tokens)
+ *     - writes the new account into the keyring credential
+ *     - updates the built-in extension's onboarding state (google.google-antigravity)
  */
 
 import * as vscode from 'vscode';
@@ -23,7 +32,69 @@ import { PathUtils } from '../../core/utils/path.utils';
 import { ProtobufUtils } from '../../core/utils/protobuf.utils';
 import { Account, AccountTokens } from '../../core/domain/models/account.model';
 import { DeviceProfile } from '../../core/domain/models/device-profile.model';
-import { STATE_DB_KEYS, STORAGE_JSON_KEYS, PERSONAL_EMAIL_DOMAINS } from '../../core/constants/app.constants';
+import { randomBytes } from 'crypto';
+import {
+  STATE_DB_KEYS,
+  STORAGE_JSON_KEYS,
+  PERSONAL_EMAIL_DOMAINS,
+  AGY_CREDENTIAL,
+  EXTENSION_STATE_KEYS,
+} from '../../core/constants/app.constants';
+
+/** Credential that the agent hub (agy.exe) loads from the OS keyring. */
+interface AgyCredentialPayload {
+  target: string;
+  userName: string;
+  /** JSON blob in the exact format agy writes itself. */
+  value: string;
+}
+
+/** Patch applied to the built-in extension's JSON state (google.google-antigravity). */
+interface ExtensionStatePatch {
+  key: string;
+  storageRoot: string;
+  values: Record<string, string>;
+}
+
+/**
+ * PowerShell script that writes a Generic credential into the Windows Credential
+ * Manager. The secret is read from the file referenced by $env:AGY_CRED_FILE so
+ * tokens never appear on a command line.
+ */
+const AGY_CREDENTIAL_WRITER_PS = [
+  "$ErrorActionPreference = 'Stop'",
+  "$src = @'",
+  'using System;',
+  'using System.Runtime.InteropServices;',
+  'using System.Text;',
+  'public static class AgyHubCredWriter {',
+  '  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]',
+  '  public struct CREDENTIAL {',
+  '    public int Flags; public int Type; public string TargetName; public string Comment;',
+  '    public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;',
+  '    public int CredentialBlobSize; public IntPtr CredentialBlob; public int Persist;',
+  '    public int AttributeCount; public IntPtr Attributes; public string TargetAlias; public string UserName;',
+  '  }',
+  '  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]',
+  '  static extern bool CredWrite(ref CREDENTIAL credential, int flags);',
+  '  public static void Write(string target, string user, string secret) {',
+  '    byte[] blob = Encoding.UTF8.GetBytes(secret);',
+  '    CREDENTIAL c = new CREDENTIAL();',
+  '    c.Type = 1; c.TargetName = target; c.UserName = user; c.Persist = 2;',
+  '    c.CredentialBlobSize = blob.Length;',
+  '    c.CredentialBlob = Marshal.AllocHGlobal(blob.Length);',
+  '    try {',
+  '      Marshal.Copy(blob, 0, c.CredentialBlob, blob.Length);',
+  '      if (!CredWrite(ref c, 0)) { throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()); }',
+  '    } finally { Marshal.FreeHGlobal(c.CredentialBlob); }',
+  '  }',
+  '}',
+  "'@",
+  'Add-Type -TypeDefinition $src',
+  '$data = Get-Content -Raw -Encoding UTF8 -LiteralPath $env:AGY_CRED_FILE | ConvertFrom-Json',
+  '[AgyHubCredWriter]::Write($data.target, $data.userName, $data.value)',
+  "Write-Output 'AGY_CREDENTIAL_WRITTEN'",
+].join('\r\n');
 import { getAntigravityVersion, isVersionSupported, MIN_SUPPORTED_VERSION } from '../../core/utils/version.utils';
 
 export class StateDbService {
@@ -108,14 +179,27 @@ export class StateDbService {
         rows.push({ key: STATE_DB_KEYS.TELEMETRY_LAST_SESSION_DATE, value: nowUtc });
       }
 
-      // ── Step 4: Spawn background worker + close window ──
+      // ── Step 4: Agent hub keyring credential + built-in extension onboarding state ──
+      const agyCredential = this.buildAgyCredential(account.email, tokens, isGcpTos);
+      const extensionStatePatch: ExtensionStatePatch = {
+        key: STATE_DB_KEYS.EXTENSION_STATE,
+        storageRoot: EXTENSION_STATE_KEYS.STORAGE_ROOT,
+        values: {
+          [EXTENSION_STATE_KEYS.LAST_LOGIN_USERNAME]: account.email,
+          [EXTENSION_STATE_KEYS.LAST_LOGIN_IS_GCP_TOS]: String(isGcpTos),
+        },
+      };
+
+      // ── Step 5: Spawn background worker + close window ──
       const triggered = await this.triggerWorkerAndClose(
         account.email,
         dbPath,
         rows,
         product.executablePath || process.execPath,
         product.processName,
-        product.displayName
+        product.displayName,
+        agyCredential,
+        extensionStatePatch
       );
       return triggered ? 'success' : 'cancelled';
 
@@ -137,7 +221,9 @@ export class StateDbService {
     rows: Array<{ key: string; value: string | null }>,
     executablePath: string,
     processName: string,
-    productName: string
+    productName: string,
+    agyCredential: AgyCredentialPayload | null = null,
+    extensionStatePatch: ExtensionStatePatch | null = null
   ): Promise<boolean> {
     const i18n = I18nService.getInstance();
     const actionYes = i18n.t('switchPrompt.actionYes');
@@ -168,7 +254,17 @@ export class StateDbService {
     const payloadPath = path.join(workDir, '.inject-payload.json');
     const workerPath = path.join(workDir, '.inject-worker.js');
 
-    const payloadObj = { dbPath, rows, executablePath, processName, productName };
+    const payloadObj = {
+      dbPath,
+      rows,
+      executablePath,
+      processName,
+      productName,
+      extensionStatePatch,
+      agyCredential,
+      agyProcessName: AGY_CREDENTIAL.PROCESS_NAME,
+      credentialWriterScript: agyCredential ? AGY_CREDENTIAL_WRITER_PS : null,
+    };
 
     fs.writeFileSync(payloadPath, JSON.stringify(payloadObj, null, 2), 'utf-8');
     fs.writeFileSync(workerPath, this.getWorkerScript(), 'utf-8');
@@ -231,6 +327,10 @@ if (!payloadPath || !fs.existsSync(payloadPath)) {
 
 const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf-8'));
 const { dbPath, rows, executablePath, processName, productName } = payload;
+const extensionStatePatch = payload.extensionStatePatch || null;
+const agyCredential = payload.agyCredential || null;
+const agyProcessName = String(payload.agyProcessName || 'agy.exe').toLowerCase();
+const credentialWriterScript = payload.credentialWriterScript || null;
 const ownPid = process.pid;
 
 log('Worker started. Own PID: ' + ownPid);
@@ -303,6 +403,123 @@ function forceKillRemainingPids() {
   }
 }
 
+// ── PowerShell helper (script passed as -EncodedCommand → no quoting issues) ──
+function runPowerShell(script, extraEnv) {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  return execSync('powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' + encoded, {
+    encoding: 'utf-8',
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: Object.assign({}, process.env, extraEnv || {}),
+    timeout: 60000,
+  });
+}
+
+// ── Agent hub (agy.exe --hub) process discovery ──
+function listAgyProcesses() {
+  if (process.platform !== 'win32') return [];
+  try {
+    const safeName = agyProcessName.replace(/'/g, '');
+    const out = runPowerShell(
+      "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq '" + safeName + "' } | " +
+      'Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress'
+    );
+    const text = String(out || '').trim();
+    if (!text) return [];
+    const parsed = JSON.parse(text);
+    return (Array.isArray(parsed) ? parsed : [parsed]).map(p => ({
+      pid: Number(p.ProcessId),
+      ppid: Number(p.ParentProcessId),
+      cmd: String(p.CommandLine || ''),
+    }));
+  } catch (e) {
+    log('Could not list agent hub processes: ' + String(e));
+    return [];
+  }
+}
+
+// Stops any running agy.exe --hub daemon processes after the IDE has exited.
+// Relying only on ParentProcessId is unsafe because once the parent IDE utility
+// process exits, orphaned hub processes may retain a dead PPID while still
+// holding the old OAuth token in memory.
+function stopAllAgyHubProcesses() {
+  const hubs = listAgyProcesses().filter(p => p.pid !== ownPid && (!p.cmd || p.cmd.indexOf('--hub') !== -1));
+  if (hubs.length) {
+    log('Stopping lingering agy.exe --hub processes: ' + hubs.map(h => h.pid).join(', '));
+    for (const h of hubs) {
+      try {
+        execSync('taskkill /F /PID ' + h.pid, { stdio: 'ignore', windowsHide: true });
+        log('  Stopped agent hub PID ' + h.pid);
+      } catch (e) {
+        log('  Failed to stop agent hub PID ' + h.pid + ': ' + String(e));
+      }
+    }
+    return;
+  }
+  // Fallback if CIM query returned nothing or failed: kill by image name directly
+  try {
+    execSync('taskkill /F /IM "' + agyProcessName + '"', { stdio: 'ignore', windowsHide: true });
+    log('Stopped ' + agyProcessName + ' processes via taskkill /IM fallback.');
+  } catch {
+    log('No lingering agy.exe processes found.');
+  }
+}
+
+// ── Built-in extension state (google.google-antigravity) ──
+// Keeps the agent UI onboarding info ("last login username") in sync with the
+// injected account. Preserves all existing keys inside google.google-antigravity.
+function patchExtensionState(db) {
+  if (!extensionStatePatch || !extensionStatePatch.key) return;
+  try {
+    const st = db.prepare('SELECT value FROM ItemTable WHERE key = ?');
+    st.bind([extensionStatePatch.key]);
+    const exists = st.step();
+    const raw = exists ? st.get()[0] : null;
+    st.free();
+    let obj = {};
+    if (exists && raw !== null && raw !== undefined) {
+      const text = typeof raw === 'string' ? raw : Buffer.from(raw).toString('utf-8');
+      try { obj = JSON.parse(text); } catch { obj = {}; }
+      if (!obj || typeof obj !== 'object') obj = {};
+    }
+    const rootKey = extensionStatePatch.storageRoot;
+    const storage = (obj[rootKey] && typeof obj[rootKey] === 'object') ? obj[rootKey] : {};
+    const values = extensionStatePatch.values || {};
+    for (const k of Object.keys(values)) storage[k] = values[k];
+    obj[rootKey] = storage;
+    db.run('INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)', [extensionStatePatch.key, JSON.stringify(obj)]);
+    log('  PATCHED: ' + extensionStatePatch.key + ' (onboarding login info)');
+  } catch (e) {
+    log('  WARNING: Failed to patch extension state: ' + String(e));
+  }
+}
+
+// ── Agent hub credential (Windows Credential Manager "gemini:antigravity") ──
+function writeAgyCredential() {
+  if (!agyCredential || !credentialWriterScript) {
+    log('No agent hub credential to write.');
+    return;
+  }
+  if (process.platform !== 'win32') {
+    log('Agent hub credential write is only supported on Windows.');
+    return;
+  }
+  const credFile = path.join(path.dirname(payloadPath), '.agy-cred-' + process.pid + '.json');
+  try {
+    fs.writeFileSync(credFile, JSON.stringify(agyCredential), 'utf-8');
+    const out = runPowerShell(credentialWriterScript, { AGY_CRED_FILE: credFile });
+    if (String(out).indexOf('AGY_CREDENTIAL_WRITTEN') !== -1) {
+      log('Agent hub credential updated (' + agyCredential.target + ').');
+    } else {
+      log('WARNING: Credential writer finished without confirmation.');
+    }
+  } catch (e) {
+    log('WARNING: Failed to write agent hub credential: ' + String((e && e.message) || e));
+  } finally {
+    try { fs.unlinkSync(credFile); } catch {}
+  }
+}
+
 async function inject() {
   // Phase 1: Wait up to 5s for Antigravity to flush and gracefully exit
   // (The log showed most processes exit within ~2 seconds)
@@ -316,6 +533,10 @@ async function inject() {
     log('Graceful exit incomplete. Force-killing remaining processes...');
     forceKillRemainingPids();
   }
+
+  // Phase 2b: Stop any lingering agy.exe --hub backend processes so they
+  // cannot overwrite the new keyring credential with a cached token.
+  stopAllAgyHubProcesses();
 
   // Phase 3: Safety margin for OS to release file locks
   await new Promise(r => setTimeout(r, 1500));
@@ -351,6 +572,7 @@ async function inject() {
         log('  INJECTED: ' + key + ' (' + value.length + ' chars)');
       }
     }
+    patchExtensionState(db);
     const out = db.export();
     fs.writeFileSync(dbPath, Buffer.from(out));
     log('Database saved.');
@@ -377,6 +599,9 @@ async function inject() {
 
   // Cleanup payload file
   try { fs.unlinkSync(payloadPath); } catch {}
+
+  // ── Update the agent hub credential (Windows Credential Manager) ──
+  writeAgyCredential();
 
   // ── Relaunch Antigravity ──
   const relaunchExe = executablePath && fs.existsSync(executablePath) ? executablePath : null;
@@ -448,7 +673,15 @@ inject().catch((err) => {
       const db = new SQL.Database(buf);
 
       try {
-        // Read the userStatus entry which contains the email
+        // 1. Prefer the new built-in extension state (google.google-antigravity),
+        //    which stores the active account under antigravity-storage["agy.onboarding.lastLoginUsername"].
+        const extEmail = this.readEmailFromExtensionState(db);
+        if (extEmail) {
+          Logger.getInstance().info(`Detected active Antigravity account (extension state): ${extEmail}`);
+          return extEmail;
+        }
+
+        // 2. Fallback: read the legacy userStatus entry which contains the email
         // sql.js uses prepare/bind for parameterized queries
         const stmt = db.prepare('SELECT value FROM ItemTable WHERE key = $key');
         stmt.bind({ $key: STATE_DB_KEYS.USER_STATUS });
@@ -468,7 +701,7 @@ inject().catch((err) => {
         // Decode the protobuf chain to extract the email
         const email = this.extractEmailFromUserStatus(base64Value);
         if (email) {
-          Logger.getInstance().info(`Detected active Antigravity account: ${email}`);
+          Logger.getInstance().info(`Detected active Antigravity account (userStatus): ${email}`);
         }
         return email;
       } finally {
@@ -481,9 +714,40 @@ inject().catch((err) => {
   }
 
   /**
+   * Reads the active email from the built-in `google.google-antigravity`
+   * extension state JSON (`antigravity-storage["agy.onboarding.lastLoginUsername"]`).
+   */
+  private readEmailFromExtensionState(db: any): string | null {
+    try {
+      const stmt = db.prepare('SELECT value FROM ItemTable WHERE key = $key');
+      stmt.bind({ $key: STATE_DB_KEYS.EXTENSION_STATE });
+      if (!stmt.step()) {
+        stmt.free();
+        return null;
+      }
+      const row = stmt.get();
+      stmt.free();
+      const raw = row[0];
+      if (!raw) return null;
+      const text = typeof raw === 'string' ? raw : Buffer.from(raw).toString('utf-8');
+      const parsed = JSON.parse(text);
+      const storage = parsed?.[EXTENSION_STATE_KEYS.STORAGE_ROOT];
+      const email = storage?.[EXTENSION_STATE_KEYS.LAST_LOGIN_USERNAME];
+      if (typeof email === 'string' && email.includes('@')) {
+        return email.trim();
+      }
+      return null;
+    } catch (e) {
+      Logger.getInstance().warn('Failed to parse google.google-antigravity extension state', e);
+      return null;
+    }
+  }
+
+  /**
    * Extracts the email from a base64-encoded userStatus protobuf.
    * The structure is: Topic → DataEntry → Row → UserStatus payload.
-   * The email is stored in field 3 and field 7 of the UserStatus payload.
+   * In full UserStatus messages written by Antigravity, field 3 is the display
+   * name and field 7 is the email; in minimal injected payloads both contain the email.
    */
   private extractEmailFromUserStatus(base64Value: string): string | null {
     try {
@@ -505,11 +769,18 @@ inject().catch((err) => {
       // Level 5: Decode inner payload (base64 → UserStatus protobuf)
       const userStatusBytes = Buffer.from(innerBase64, 'base64');
 
-      // Level 6: Extract email from UserStatus (field 3 or field 7)
-      const emailField3 = this.extractStringField(userStatusBytes, 3);
+      // Level 6: Extract email from UserStatus (prefer field 7 which is always the email,
+      // then fall back to field 3 only if it looks like an email address)
       const emailField7 = this.extractStringField(userStatusBytes, 7);
+      if (emailField7 && emailField7.includes('@')) {
+        return emailField7.trim();
+      }
+      const emailField3 = this.extractStringField(userStatusBytes, 3);
+      if (emailField3 && emailField3.includes('@')) {
+        return emailField3.trim();
+      }
       
-      return emailField3 || emailField7 || null;
+      return emailField7 || emailField3 || null;
     } catch (e) {
       Logger.getInstance().error('Failed to parse userStatus protobuf', e);
       return null;
@@ -618,6 +889,194 @@ inject().catch((err) => {
   private shouldEnableGcpTos(email: string): boolean {
     const lowerEmail = email.toLowerCase();
     return !PERSONAL_EMAIL_DOMAINS.some((d: string) => lowerEmail.endsWith(d));
+  }
+
+  /**
+   * Builds the keyring credential consumed by the agent hub (agy.exe).
+   * The JSON mirrors exactly what agy writes itself:
+   *   { token: { access_token, token_type, refresh_token, expiry, expires_in },
+   *     auth_method: "consumer", id_token_email, writer_id }
+   *
+   * Only personal (consumer) accounts are supported for now: the auth_method
+   * value used by agy for GCP/enterprise logins is unknown, and writing a wrong
+   * one would break the agent login.
+   */
+  private buildAgyCredential(
+    email: string,
+    tokens: AccountTokens,
+    isGcpTos: boolean
+  ): AgyCredentialPayload | null {
+    if (process.platform !== 'win32') {
+      Logger.getInstance().info('Agent hub keyring sync skipped (non-Windows platform).');
+      return null;
+    }
+    if (isGcpTos) {
+      Logger.getInstance().warn(`Agent hub keyring sync skipped for non-consumer account ${email}.`);
+      return null;
+    }
+    if (!tokens.accessToken || !tokens.refreshToken) {
+      Logger.getInstance().warn(`Agent hub keyring sync skipped for ${email}: missing tokens.`);
+      return null;
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiresAt = Number(tokens.expiresAt) || nowSeconds;
+    const value = JSON.stringify({
+      token: {
+        access_token: tokens.accessToken,
+        token_type: 'Bearer',
+        refresh_token: tokens.refreshToken,
+        expiry: new Date(expiresAt * 1000).toISOString(),
+        expires_in: Math.max(0, expiresAt - nowSeconds),
+      },
+      auth_method: AGY_CREDENTIAL.AUTH_METHOD_CONSUMER,
+      id_token_email: email,
+      writer_id: randomBytes(16).toString('base64url'),
+    });
+
+    return { target: AGY_CREDENTIAL.TARGET, userName: AGY_CREDENTIAL.USER_NAME, value };
+  }
+
+  // ─── Live injection (no window reload) ────────────────────────────────────
+  //
+  // Instead of closing the window, spawning a worker, patching state.vscdb on
+  // disk, and relaunching the IDE, this path writes credentials directly while
+  // the IDE is running and then asks VS Code to restart only the extension host.
+  //
+  // Why this works with the new Antigravity architecture (v1.107.0+):
+  //   - The AI agent runs in agy.exe --hub which reads its OAuth token from the
+  //     OS Credential Manager ("gemini:antigravity"), NOT from state.vscdb.
+  //   - "Restart Extension Host" kills the old extension host process (which
+  //     owns the agy.exe --hub child), then spins up a fresh one. The restarted
+  //     google.google-antigravity extension spawns a new hub that reads the
+  //     updated credential.
+  //   - The main Electron process (UI) stays alive, so open tabs, terminals,
+  //     and unsaved work are preserved.
+  //
+
+  async injectAccountStateLive(
+    account: Account,
+    tokens: AccountTokens,
+    deviceProfile?: DeviceProfile | null
+  ): Promise<'success' | 'cancelled' | 'error'> {
+    const product = PathUtils.getAntigravityProduct();
+    const versionCheckResult = this.checkAntigravityVersion();
+    if (versionCheckResult === 'unsupported') {
+      const i18n = I18nService.getInstance();
+      vscode.window.showErrorMessage(
+        i18n.t('stateDb.outdatedAntigravity', { minVersion: MIN_SUPPORTED_VERSION }),
+        { modal: true }
+      );
+      return 'error';
+    }
+
+    try {
+      const isGcpTos = this.shouldEnableGcpTos(account.email);
+
+      // ── Step 1: Write keyring credential ──
+      const agyCredential = this.buildAgyCredential(account.email, tokens, isGcpTos);
+      if (agyCredential) {
+        await this.writeCredentialDirect(agyCredential);
+      }
+
+      // ── Step 2: Kill existing agy.exe --hub processes ──
+      await this.killAgyHubProcesses();
+
+      // ── Step 3: Small delay to let processes terminate ──
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // ── Step 4: Restart Extension Host ──
+      Logger.getInstance().info('Restarting extension host for live account switch...');
+      await vscode.commands.executeCommand('workbench.action.restartExtensionHost');
+
+      return 'success';
+    } catch (error: any) {
+      Logger.getInstance().error('Live account injection failed', error);
+      // Fallback: try the legacy worker-based approach
+      Logger.getInstance().info('Falling back to legacy worker-based injection...');
+      return this.injectAccountState(account, tokens, deviceProfile);
+    }
+  }
+
+  /**
+   * Writes a credential directly to Windows Credential Manager from within
+   * the extension host process (no external worker needed).
+   */
+  private async writeCredentialDirect(credential: AgyCredentialPayload): Promise<void> {
+    if (process.platform !== 'win32') {
+      Logger.getInstance().info('Credential write skipped (non-Windows).');
+      return;
+    }
+
+    const credFile = path.join(__dirname, `.agy-cred-live-${process.pid}.json`);
+    try {
+      fs.writeFileSync(credFile, JSON.stringify(credential), 'utf-8');
+
+      const workerEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGY_CRED_FILE: credFile };
+      const encoded = Buffer.from(AGY_CREDENTIAL_WRITER_PS, 'utf16le').toString('base64');
+      const { execSync } = require('child_process');
+      const result = execSync(
+        'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' + encoded,
+        {
+          encoding: 'utf-8',
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: workerEnv,
+          timeout: 30000,
+        }
+      );
+
+      if (String(result).includes('AGY_CREDENTIAL_WRITTEN')) {
+        Logger.getInstance().info(`Credential updated for ${credential.target}.`);
+      } else {
+        Logger.getInstance().warn('Credential writer finished without confirmation.');
+      }
+    } finally {
+      try { fs.unlinkSync(credFile); } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * Kills all running agy.exe --hub processes so they don't cache old tokens.
+   */
+  private async killAgyHubProcesses(): Promise<void> {
+    if (process.platform !== 'win32') return;
+
+    try {
+      const { execSync } = require('child_process');
+      const processName = AGY_CREDENTIAL.PROCESS_NAME;
+
+      // Try via tasklist first
+      try {
+        const out = execSync(`tasklist /FI "IMAGENAME eq ${processName}" /FO CSV /NH`, {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          windowsHide: true,
+        });
+        const pids: number[] = [];
+        for (const line of out.split('\n')) {
+          const match = line.match(/^"([^"]+)","(\d+)"/);
+          if (match && match[1].toLowerCase() === processName.toLowerCase()) {
+            pids.push(parseInt(match[2], 10));
+          }
+        }
+        if (pids.length > 0) {
+          Logger.getInstance().info(`Killing ${pids.length} agy.exe processes: ${pids.join(', ')}`);
+          for (const pid of pids) {
+            try {
+              execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', windowsHide: true });
+            } catch { /* best effort */ }
+          }
+        }
+      } catch {
+        // Fallback: kill by image name
+        try {
+          execSync(`taskkill /F /IM "${processName}"`, { stdio: 'ignore', windowsHide: true });
+        } catch { /* no processes found, fine */ }
+      }
+    } catch (e) {
+      Logger.getInstance().warn('Failed to kill agy.exe processes: ' + String(e));
+    }
   }
 
   private performRollingBackup(dbPath: string): void {

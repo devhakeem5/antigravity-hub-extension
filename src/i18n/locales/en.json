@@ -137,6 +137,7 @@
     "tooltip": "Click to switch account",
     "noQuotaData": "No quota data",
     "geminiShort": "Gemini",
+    "gemini4Short": "Gemini 4",
     "claudeGptShort": "Claude/GPT",
     "weeklyShort": "W",
     "fiveHourShort": "5h"
@@ -185,6 +186,7 @@
     "renewsInDaysHoursMins": "Renews in {{days}}d {{hours}}h {{mins}}m",
     "renewsInHoursMins": "Renews in {{hours}}h {{mins}}m",
     "geminiModels": "Gemini Models",
+    "gemini4Models": "Gemini 4 Argon",
     "claudeGptModels": "Claude and GPT Models",
     "weeklyLimitRemaining": "Weekly Limit Remaining",
     "fiveHourLimitRemaining": "Five Hour Limit Remaining",
@@ -205,6 +207,8 @@
     "autoRefreshDescription": "When enabled, balances are refreshed automatically when you open the panel.",
     "hideGeminiBalancesLabel": "Hide Gemini Model Balances",
     "hideGeminiBalancesDescription": "Collapse Gemini balances in account cards to keep Claude and GPT limits in focus.",
+    "showGemini4LimitLabel": "Show Gemini 4 Limit",
+    "showGemini4LimitDescription": "Display Gemini 4 Argon quota as a separate section, even when Gemini balances are hidden.",
     "refreshIntervalLabel": "Refresh Interval",
     "refreshIntervalDescription": "Balances will refresh if more than this interval has passed since the last update.",
     "intervalImmediate": "Immediately",
@@ -240,7 +244,8 @@
     "outdatedAntigravity": "Installed Antigravity version is older than {{minVersion}} and not supported.\nPlease update Antigravity to version {{minVersion}} or newer to use account switching.",
     "dbNotFound": "Antigravity database not found.\nMake sure you have launched Antigravity and logged in at least once.",
     "injectionFailed": "Failed to inject data into database: {{error}}\nTry closing all other Antigravity windows and try again.",
-    "reloadPrompt": "This window will close and Antigravity will be reopened with the new account."
+    "reloadPrompt": "This window will close and Antigravity will be reopened with the new account.",
+    "liveReloadPrompt": "Extensions will be restarted to activate the new account. Your open tabs and terminals will be preserved."
   },
   "oauth": {
     "timeout": "Authentication timeout. Please try again.",

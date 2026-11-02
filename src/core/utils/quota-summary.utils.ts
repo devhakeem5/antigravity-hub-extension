@@ -61,7 +61,7 @@ export function deriveQuotaSummaryFromBalances(balances: Record<string, unknown>
   }
 
   const result: QuotaSummary = [];
-  for (const groupId of ['gemini', 'claude-gpt'] as const) {
+  for (const groupId of ['gemini', 'gemini-4', 'claude-gpt'] as const) {
     const entries = candidates.get(groupId) || [];
     if (!entries.length) {continue;}
     const group: QuotaGroup = { id: groupId };
@@ -86,6 +86,8 @@ export interface QuotaSortMetrics {
   effectivePercent: number;
   hasFiveHour: boolean;
   weeklyPercent: number;
+  /** Reset time (ms since epoch) for the weekly window, or Infinity if unknown. */
+  weeklyResetMs: number;
 }
 
 /** Returns the values used to rank an account inside one quota group. */
@@ -96,11 +98,21 @@ export function getQuotaSortMetrics(
   const group = (summary || []).find(item => item.id === groupId);
   const weeklyPercent = group?.weekly?.remainingPercent ?? -1;
   const hasFiveHour = group?.fiveHour !== undefined;
+  const effectiveWindow = group?.fiveHour ?? group?.weekly;
+  const effectivePercent = effectiveWindow?.remainingPercent ?? -1;
+  const weeklyResetMs = parseResetMs(group?.weekly?.resetTime);
   return {
-    effectivePercent: group?.fiveHour?.remainingPercent ?? weeklyPercent,
+    effectivePercent,
     hasFiveHour,
     weeklyPercent,
+    weeklyResetMs,
   };
+}
+
+function parseResetMs(resetTime?: string): number {
+  if (!resetTime) return Infinity;
+  const ms = new Date(resetTime).getTime();
+  return Number.isFinite(ms) ? ms : Infinity;
 }
 
 function quotaPercentages(summary: QuotaSummary | undefined): number[] {
@@ -111,10 +123,12 @@ function quotaPercentages(summary: QuotaSummary | undefined): number[] {
 
 function classifyGroup(group: Record<string, unknown>): QuotaGroupId | undefined {
   const text = searchableText(group);
+  if (/gemini\s*4|argon/i.test(text)) {return 'gemini-4';}
   if (text.includes('gemini')) {return 'gemini';}
   if (text.includes('claude') || text.includes('gpt') || text.includes('other model')) {return 'claude-gpt';}
 
   const bucketText = asArray(group.buckets).map(item => searchableText(asRecord(item))).join(' ');
+  if (/gemini\s*4|argon/i.test(bucketText)) {return 'gemini-4';}
   if (bucketText.includes('gemini')) {return 'gemini';}
   if (bucketText.includes('claude') || bucketText.includes('gpt')) {return 'claude-gpt';}
   return undefined;
@@ -134,6 +148,7 @@ function classifyWindow(bucket: Record<string, unknown>): QuotaWindowId | undefi
 
 function classifyModelName(modelName: string): QuotaGroupId | undefined {
   const name = modelName.toLowerCase();
+  if (/gemini[\s_-]*4|argon/.test(name)) {return 'gemini-4';}
   if (name.includes('gemini')) {return 'gemini';}
   if (name.includes('claude') || name.includes('gpt')) {return 'claude-gpt';}
   return undefined;
@@ -172,7 +187,7 @@ function mergeDuplicateGroups(groups: QuotaSummary): QuotaSummary {
     if (group.fiveHour) {current.fiveHour = group.fiveHour;}
     merged.set(group.id, current);
   }
-  return ['gemini', 'claude-gpt'].flatMap(id => {
+  return ['gemini', 'gemini-4', 'claude-gpt'].flatMap(id => {
     const group = merged.get(id as QuotaGroupId);
     return group ? [group] : [];
   });

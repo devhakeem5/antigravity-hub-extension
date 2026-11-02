@@ -71,11 +71,31 @@ export const STATE_DB_KEYS = {
   AUTH_STATUS: 'antigravityAuthStatus',
   ONBOARDING: 'antigravityOnboarding',
   LEGACY: 'google.antigravity',
+  /** Built-in Antigravity extension state blob (JSON) - holds agy onboarding data */
+  EXTENSION_STATE: 'google.google-antigravity',
   TELEMETRY_SERVICE_MACHINE_ID: 'telemetry.serviceMachineId',
   STORAGE_SERVICE_MACHINE_ID: 'storage.serviceMachineId',
   TELEMETRY_FIRST_SESSION_DATE: 'telemetry.firstSessionDate',
   TELEMETRY_LAST_SESSION_DATE: 'telemetry.lastSessionDate',
   TELEMETRY_CURRENT_SESSION_DATE: 'telemetry.currentSessionDate',
+} as const;
+
+// ── Antigravity Agent Hub (agy) Credential ──
+// Since the new Antigravity IDE, the agent backend (agy.exe --hub) no longer takes the
+// account from state.vscdb. It loads its OAuth token from the OS keyring
+// (Windows Credential Manager: target "gemini:antigravity", user "antigravity").
+export const AGY_CREDENTIAL = {
+  TARGET: 'gemini:antigravity',
+  USER_NAME: 'antigravity',
+  PROCESS_NAME: 'agy.exe',
+  AUTH_METHOD_CONSUMER: 'consumer',
+} as const;
+
+// ── Keys inside the google.google-antigravity JSON blob ──
+export const EXTENSION_STATE_KEYS = {
+  STORAGE_ROOT: 'antigravity-storage',
+  LAST_LOGIN_USERNAME: 'agy.onboarding.lastLoginUsername',
+  LAST_LOGIN_IS_GCP_TOS: 'agy.onboarding.lastLoginIsGcpTos',
 } as const;
 
 // ── Protobuf Sentinel Keys ──

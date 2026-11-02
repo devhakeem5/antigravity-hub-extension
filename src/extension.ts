@@ -97,7 +97,7 @@ function registerCommands(
   const statusBarProvider = new StatusBarProvider(accountRepo, accountService);
   disposables.push(statusBarProvider);
 
-  const accountsProvider = new AccountsWebviewProvider(context.extensionUri, accountRepo, accountService);
+  const accountsProvider = new AccountsWebviewProvider(context.extensionUri, accountRepo, accountService, context);
   disposables.push(
     vscode.window.registerWebviewViewProvider(AccountsWebviewProvider.viewType, accountsProvider)
   );

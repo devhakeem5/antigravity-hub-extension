@@ -1,4 +1,4 @@
-export type QuotaGroupId = 'gemini' | 'claude-gpt';
+export type QuotaGroupId = 'gemini' | 'claude-gpt' | 'gemini-4';
 export type QuotaWindowId = 'weekly' | 'five-hour';
 
 export interface QuotaWindow {

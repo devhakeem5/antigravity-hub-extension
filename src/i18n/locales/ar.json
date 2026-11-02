@@ -137,6 +137,7 @@
     "tooltip": "انقر لتبديل الحساب",
     "noQuotaData": "لا توجد بيانات للرصيد",
     "geminiShort": "Gemini",
+    "gemini4Short": "Gemini 4",
     "claudeGptShort": "Claude/GPT",
     "weeklyShort": "أسبوعي",
     "fiveHourShort": "5س"
@@ -185,6 +186,7 @@
     "renewsInDaysHoursMins": "يتجدد بعد {{days}}ي {{hours}}س {{mins}}د",
     "renewsInHoursMins": "يتجدد بعد {{hours}}س {{mins}}د",
     "geminiModels": "نماذج Gemini",
+    "gemini4Models": "Gemini 4 Argon",
     "claudeGptModels": "نماذج Claude وGPT",
     "weeklyLimitRemaining": "المتبقي من الحد الأسبوعي",
     "fiveHourLimitRemaining": "المتبقي من حد الخمس ساعات",
@@ -205,6 +207,8 @@
     "autoRefreshDescription": "عند التفعيل، يتم تحديث الأرصدة تلقائياً عند فتح اللوحة.",
     "hideGeminiBalancesLabel": "إخفاء أرصدة نماذج Gemini",
     "hideGeminiBalancesDescription": "طي أرصدة Gemini داخل بطاقات الحسابات لإبقاء حدود Claude وGPT في الواجهة.",
+    "showGemini4LimitLabel": "إظهار رصيد Gemini 4",
+    "showGemini4LimitDescription": "عرض رصيد Gemini 4 Argon كقسم منفصل، حتى عند إخفاء أرصدة Gemini.",
     "refreshIntervalLabel": "فترة التحديث",
     "refreshIntervalDescription": "يتم تحديث الأرصدة إذا مرت أكثر من هذه الفترة منذ آخر تحديث.",
     "intervalImmediate": "فوراً",
@@ -240,7 +244,8 @@
     "outdatedAntigravity": "إصدار Antigravity المثبت أقدم من {{minVersion}} وغير مدعوم.\nيرجى تحديث Antigravity إلى الإصدار {{minVersion}} أو أحدث لاستخدام ميزة تبديل الحسابات.",
     "dbNotFound": "لم يتم العثور على قاعدة بيانات Antigravity.\nتأكد من أنك قمت بتشغيل Antigravity وتسجيل الدخول مرة واحدة على الأقل.",
     "injectionFailed": "فشل حقن البيانات في قاعدة البيانات: {{error}}\nحاول إغلاق جميع نوافذ Antigravity الأخرى ثم أعد المحاولة.",
-    "reloadPrompt": "سيتم إغلاق هذه النافذة وإعادة فتح Antigravity بالحساب الجديد."
+    "reloadPrompt": "سيتم إغلاق هذه النافذة وإعادة فتح Antigravity بالحساب الجديد.",
+    "liveReloadPrompt": "سيتم إعادة تشغيل الإضافات لتفعيل الحساب الجديد. التبويبات والطرفيات المفتوحة ستبقى كما هي."
   },
   "oauth": {
     "timeout": "انتهى وقت انتظار المصادقة. يرجى المحاولة مرة أخرى.",

@@ -5,6 +5,18 @@ All notable changes to the "Antigravity Hub" extension will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-11-02
+
+### Added
+- **Gemini 4 Argon**: Display Gemini 4 Argon quota as a separate section. You can hide it from settings if you prefer to focus only on Claude model limits.
+- **Seamless Account Switching**: Switching accounts now takes effect instantly without restarting the editor window.
+
+### Fixed
+- **Account Switching**: Fixed account switching to work with the new method introduced in Antigravity IDE v2.6.0.
+
+### Improved
+- **Account Sorting**: Improved the sorting algorithm so exhausted accounts are ranked by nearest renewal time, with better detection of the currently active account.
+
 ## [2.0.1] - 2026-08-26
 
 ### Fixed
