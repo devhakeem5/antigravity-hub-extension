@@ -482,8 +482,6 @@ export class AccountService {
 
     callbacks?.onDone?.(email, balanceInfo.balances, status, true);
 
-    // Update global refresh timestamp
-    await this.accountRepo.setBalancesLastRefreshed(Date.now());
     return true;
   }
 

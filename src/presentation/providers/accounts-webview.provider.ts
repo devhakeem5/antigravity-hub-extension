@@ -1196,7 +1196,7 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
         ? `<div class="badge expired-badge">${i18n.t('accounts.expired')}</div>`
         : '';
       const refreshButtonHtml = isExpired ? '' : `
-        <button type="button" class="btn-refresh-account" onclick="handleSingleAccountRefresh(this, '${acc.email}')" title="${i18n.t('accounts.refreshAccount')}" aria-label="${i18n.t('accounts.refreshAccount')}"${actionDisabled}>
+        <button type="button" class="btn-refresh-account" onclick="handleSingleAccountRefresh(event, this)" title="${i18n.t('accounts.refreshAccount')}" aria-label="${i18n.t('accounts.refreshAccount')}"${actionDisabled}>
           <svg class="refresh-account-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.5-2.6L20 9M4 15l2.4 2.6A7 7 0 0 0 17.9 15"/></svg>
         </button>`;
 
@@ -2698,9 +2698,14 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
             syncGlobalRefreshAvailability();
           }
 
-          function handleSingleAccountRefresh(button, email) {
+          function handleSingleAccountRefresh(event, button) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const card = button.closest('.account-card');
+            const email = card ? card.dataset.email : '';
             const normalizedEmail = String(email || '').toLowerCase();
-            if (isRefreshing || refreshingAccountEmails.has(normalizedEmail) || button.disabled) return;
+            if (!normalizedEmail || isRefreshing || refreshingAccountEmails.has(normalizedEmail) || button.disabled) return;
             setAccountCardRefreshing(email, true);
             vscode.postMessage({ command: 'refreshSingleAccount', email });
           }
