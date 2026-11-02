@@ -257,6 +257,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
   public async refresh() {
     if (this._view) {
       this._view.webview.html = await this._getHtmlForWebview(this._view.webview);
+      // Re-sync refresh state: if a bulk refresh is in progress, tell the new
+      // webview so it shows the progress banner and disables actions.
+      if (this._refreshAbortController) {
+        this._view.webview.postMessage({ command: 'refreshStarted', totalAccounts: 0 });
+      }
     }
   }
 
@@ -326,6 +331,14 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
    * a full-screen overlay.
    */
   private async handleProgressiveRefresh(notify: boolean = true, onlyEmails?: string[]): Promise<void> {
+    // Guard: prevent duplicate refresh cycles
+    if (this._refreshAbortController) {
+      vscode.window.showInformationMessage(
+        I18nService.getInstance().t('accounts.refreshAlreadyInProgress')
+      );
+      return;
+    }
+
     // Step 0: Detect and pin active account BEFORE starting the balance refresh.
     // This is an independent verification — it always runs regardless of cooldowns.
     await this.detectAndPinActiveAccount();
@@ -482,6 +495,11 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     accounts.sort((a, b) => {
       if (a.isActive && !b.isActive) return -1;
       if (!a.isActive && b.isActive) return 1;
+      const aExpired = a.status === AccountStatus.TOKEN_EXPIRED;
+      const bExpired = b.status === AccountStatus.TOKEN_EXPIRED;
+      if (aExpired && !bExpired) return 1;
+      if (!aExpired && bExpired) return -1;
+      if (aExpired && bExpired) return a.email.localeCompare(b.email);
       return this.compareAccountsByQuotaGroup(a, b, preferredGroup);
     });
 
@@ -852,10 +870,16 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const effectivePreferred = await this.resolvePreferredQuotaGroup();
 
     // ── Sort accounts ──
-    // Active account always first, then by the selected quota group's effective limit.
+    // Priority: Active first → usable accounts by quota → exhausted by renewal → expired sessions last
     accounts.sort((a, b) => {
       if (a.isActive && !b.isActive) return -1;
       if (!a.isActive && b.isActive) return 1;
+      // Expired sessions always last
+      const aExpired = a.status === AccountStatus.TOKEN_EXPIRED;
+      const bExpired = b.status === AccountStatus.TOKEN_EXPIRED;
+      if (aExpired && !bExpired) return 1;
+      if (!aExpired && bExpired) return -1;
+      if (aExpired && bExpired) return a.email.localeCompare(b.email);
       return this.compareAccountsByQuotaGroup(a, b, effectivePreferred);
     });
 
@@ -3297,23 +3321,44 @@ export class AccountsWebviewProvider implements vscode.WebviewViewProvider {
     const aMetrics = getQuotaSortMetrics(aSummary, groupId);
     const bMetrics = getQuotaSortMetrics(bSummary, groupId);
 
-    // Step 1: Sort by effective percent (5h if available, else weekly) — higher is better
-    if (aMetrics.effectivePercent !== bMetrics.effectivePercent) {
-      return bMetrics.effectivePercent - aMetrics.effectivePercent;
+    // ── Tier-based sorting (final decision) ──
+    // Tier 0: Has 5h limit AND both limits available (5h>0 AND weekly>0)
+    // Tier 1: No 5h plan at all + weekly>0 — usable via weekly only
+    // Tier 2: ANY limit exhausted (5h<=0 OR weekly<=0) — blocked, waiting for renewal
+    function getTier(m: { fiveHourPercent: number; hasFiveHour: boolean; weeklyPercent: number }) {
+      // If any limit is exhausted → exhausted tier
+      if (m.hasFiveHour && m.fiveHourPercent <= 0) return 2;
+      if (m.weeklyPercent <= 0) return 2;
+      // Both available: has 5h → tier 0, weekly-only → tier 1
+      if (m.hasFiveHour && m.fiveHourPercent > 0) return 0;
+      return 1;
     }
-    // Step 2: If effective percent is tied, sort by weekly percent — higher is better
-    if (aMetrics.weeklyPercent !== bMetrics.weeklyPercent) {
-      return bMetrics.weeklyPercent - aMetrics.weeklyPercent;
-    }
-    // Step 3: If weekly is also tied AND both exhausted, sort by weekly renewal time — sooner is better
-    if (aMetrics.weeklyPercent <= 0 && bMetrics.weeklyPercent <= 0) {
-      if (aMetrics.weeklyResetMs !== bMetrics.weeklyResetMs) {
-        return aMetrics.weeklyResetMs - bMetrics.weeklyResetMs;
+    const aTier = getTier(aMetrics);
+    const bTier = getTier(bMetrics);
+    if (aTier !== bTier) return aTier - bTier;
+
+    // Within Tier 0: has 5h, both available → sort by 5h% desc, then weekly% desc as tiebreaker
+    if (aTier === 0) {
+      if (aMetrics.fiveHourPercent !== bMetrics.fiveHourPercent) {
+        return bMetrics.fiveHourPercent - aMetrics.fiveHourPercent;
+      }
+      if (aMetrics.weeklyPercent !== bMetrics.weeklyPercent) {
+        return bMetrics.weeklyPercent - aMetrics.weeklyPercent;
       }
     }
-    // Step 4: Tie-break by five-hour availability
-    if (aMetrics.hasFiveHour !== bMetrics.hasFiveHour) {
-      return bMetrics.hasFiveHour ? 1 : -1;
+    // Within Tier 1: weekly-only → sort by weekly% desc
+    if (aTier === 1) {
+      if (aMetrics.weeklyPercent !== bMetrics.weeklyPercent) {
+        return bMetrics.weeklyPercent - aMetrics.weeklyPercent;
+      }
+    }
+    // Within Tier 2: exhausted → sort by nearest renewal time (min of 5h/weekly reset)
+    if (aTier === 2) {
+      const aMinReset = Math.min(aMetrics.fiveHourResetMs, aMetrics.weeklyResetMs);
+      const bMinReset = Math.min(bMetrics.fiveHourResetMs, bMetrics.weeklyResetMs);
+      if (aMinReset !== bMinReset) {
+        return aMinReset - bMinReset;
+      }
     }
     return a.email.localeCompare(b.email);
   }

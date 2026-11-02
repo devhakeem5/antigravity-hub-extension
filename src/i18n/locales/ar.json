@@ -107,6 +107,7 @@
     "refreshingAccount": "جارٍ التحديث",
     "refreshAccount": "تحديث",
     "singleRefreshFailed": "فشل تحديث رصيد {{email}}. سيبقى الرصيد السابق معروضًا.",
+    "refreshAlreadyInProgress": "التحديث قيد التنفيذ بالفعل. يرجى الانتظار حتى ينتهي.",
     "refreshSuccess": "✅ تم تحديث جميع الأرصدة بنجاح.",
     "cancelRefresh": "إلغاء",
     "refreshCancelled": "تم إلغاء التحديث.",

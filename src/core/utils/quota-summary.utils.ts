@@ -83,11 +83,15 @@ export function getHighestQuotaPercent(summary: QuotaSummary | undefined): numbe
 }
 
 export interface QuotaSortMetrics {
-  effectivePercent: number;
+  /** Five-hour remaining percent. >= 0 when the plan includes 5h, -1 when not. */
+  fiveHourPercent: number;
+  /** True when the plan includes a five-hour window (even if exhausted). */
   hasFiveHour: boolean;
   weeklyPercent: number;
   /** Reset time (ms since epoch) for the weekly window, or Infinity if unknown. */
   weeklyResetMs: number;
+  /** Reset time (ms since epoch) for the five-hour window, or Infinity if unknown. */
+  fiveHourResetMs: number;
 }
 
 /** Returns the values used to rank an account inside one quota group. */
@@ -98,14 +102,15 @@ export function getQuotaSortMetrics(
   const group = (summary || []).find(item => item.id === groupId);
   const weeklyPercent = group?.weekly?.remainingPercent ?? -1;
   const hasFiveHour = group?.fiveHour !== undefined;
-  const effectiveWindow = group?.fiveHour ?? group?.weekly;
-  const effectivePercent = effectiveWindow?.remainingPercent ?? -1;
+  const fiveHourPercent = hasFiveHour ? (group!.fiveHour!.remainingPercent ?? 0) : -1;
   const weeklyResetMs = parseResetMs(group?.weekly?.resetTime);
+  const fiveHourResetMs = parseResetMs(group?.fiveHour?.resetTime);
   return {
-    effectivePercent,
+    fiveHourPercent,
     hasFiveHour,
     weeklyPercent,
     weeklyResetMs,
+    fiveHourResetMs,
   };
 }
 

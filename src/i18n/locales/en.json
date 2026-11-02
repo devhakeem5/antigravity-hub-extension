@@ -107,6 +107,7 @@
     "refreshingAccount": "Refreshing",
     "refreshAccount": "Refresh",
     "singleRefreshFailed": "Failed to refresh {{email}}. The previous balance is still displayed.",
+    "refreshAlreadyInProgress": "A refresh is already in progress. Please wait for it to finish.",
     "refreshSuccess": "✅ All balances refreshed successfully.",
     "cancelRefresh": "Cancel",
     "refreshCancelled": "Refresh cancelled.",
